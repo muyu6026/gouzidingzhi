@@ -3201,16 +3201,19 @@ class MessageStatsPlugin(Star):
                         break
                 await self.data_manager.save_group_data(group_id, users)
                 
-                # 直接发送消息，避免额外的处理延迟
-                await self.context.send_message(event.unified_msg_origin, f"{user_name} {message}")
+                # 使用_send_active_message发送消息
+                result = event.plain_result(f"{user_name} {message}")
+                await self._send_active_message(event, result)
             else:
-                # 直接发送消息，避免额外的处理延迟
-                await self.context.send_message(event.unified_msg_origin, f"{user_name} {message}")
+                # 使用_send_active_message发送消息
+                result = event.plain_result(f"{user_name} {message}")
+                await self._send_active_message(event, result)
                 
         except Exception as e:
             self.logger.error(f"执行签到操作失败: {e}", exc_info=True)
-            # 直接发送消息，避免额外的处理延迟
-            await self.context.send_message(event.unified_msg_origin, "签到失败，请稍后重试")
+            # 使用_send_active_message发送消息
+            result = event.plain_result("签到失败，请稍后重试")
+            await self._send_active_message(event, result)
     
     async def _send_active_message(self, event: AstrMessageEvent, message_generator):
         """发送主动消息
