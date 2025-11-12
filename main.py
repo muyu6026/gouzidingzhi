@@ -2288,6 +2288,53 @@ class MessageStatsPlugin(Star):
         async for result in self.rbot_sign_in(event):
             yield result
     
+    @filter.command("排行信息")
+    async def rbot_rank_info(self, event: AstrMessageEvent):
+        """查看排行信息"""
+        try:
+            # 获取群组ID
+            group_id = event.get_group_id()
+            if not group_id:
+                yield event.plain_result("无法获取群组信息,请在群聊中使用此命令！")
+                return
+            
+            group_id = str(group_id)
+            
+            # 检查群组是否启用了Rbot功能
+            if not self._is_rbot_enabled_for_group(group_id):
+                yield event.plain_result("本群未启用Rbot功能！")
+                return
+            
+            # 排行信息不需要管理员权限，所有群成员都可以查看
+            
+            # 获取群组数据
+            users = await self.data_manager.get_group_data(group_id)
+            
+            if not users:
+                yield event.plain_result("本群暂无用户数据！")
+                return
+            
+            # 按修为排序
+            cultivation_sorted = sorted(users, key=lambda x: x.cultivation, reverse=True)
+            
+            # 按阅历排序
+            experience_sorted = sorted(users, key=lambda x: x.experience, reverse=True)
+            
+            # 生成排行榜消息
+            rank_msg = "修为排行榜\n━━━━━━━━━━━━━━\n"
+            for i, user in enumerate(cultivation_sorted[:10], 1):
+                rank_msg += f"{i}. {user.nickname}：{user.cultivation}修为\n"
+            
+            rank_msg += "\n阅历排行榜\n━━━━━━━━━━━━━━\n"
+            for i, user in enumerate(experience_sorted[:10], 1):
+                rank_msg += f"{i}. {user.nickname}：{user.experience}阅历\n"
+            
+            yield event.plain_result(rank_msg)
+            
+        except Exception as e:
+            self.logger.error(f"查看排行信息失败: {e}", exc_info=True)
+            yield event.plain_result("查看排行信息失败，请稍后重试")
+    
     @filter.command("查看修为排名")
     async def rbot_cultivation_rank(self, event: AstrMessageEvent):
         """查看修为排名"""
@@ -2305,10 +2352,7 @@ class MessageStatsPlugin(Star):
                 yield event.plain_result("本群未启用Rbot功能！")
                 return
             
-            # 检查是否是管理员
-            if not self._is_rbot_admin(event.get_sender_id()):
-                yield event.plain_result("只有管理员可以查看修为排名！")
-                return
+            # 修为排名不需要管理员权限，所有群成员都可以查看
             
             # 获取群组数据
             users = await self.data_manager.get_group_data(group_id)
@@ -2348,10 +2392,7 @@ class MessageStatsPlugin(Star):
                 yield event.plain_result("本群未启用Rbot功能！")
                 return
             
-            # 检查是否是管理员
-            if not self._is_rbot_admin(event.get_sender_id()):
-                yield event.plain_result("只有管理员可以查看阅历排行！")
-                return
+            # 阅历排行不需要管理员权限，所有群成员都可以查看
             
             # 获取群组数据
             users = await self.data_manager.get_group_data(group_id)
