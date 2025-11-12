@@ -17,8 +17,8 @@ from typing import List, Optional, Dict, Any
 from enum import Enum
 from pathlib import Path
 import aiofiles
-# 使用内置的datetime和re模块替代croniter
-# 这样可以减少外部依赖，提高兼容性
+# 使用croniter模块支持更灵活的定时表达式
+from croniter import croniter
 from astrbot.api import logger as astrbot_logger
 from astrbot.api.event import AstrMessageEvent, MessageChain, filter
 # PlatformAdapterType 在 astrbot.api.event.filter 中
@@ -410,8 +410,17 @@ class TimerManager:
                     self.next_push_time = self._calculate_next_push_time(config.timer_push_time)
                     self.logger.info(f"下次推送时间: {self.next_push_time}")
                 
+                # 计算等待时间，避免频繁检查
+                # 如果是cron表达式，可能需要更精确的等待时间
+                wait_seconds = 60  # 默认每分钟检查一次
+                if self.next_push_time:
+                    # 计算距离下次推送的秒数，但最多等待60秒
+                    delta_seconds = (self.next_push_time - now).total_seconds()
+                    if 0 < delta_seconds < 60:
+                        wait_seconds = int(delta_seconds) + 1  # 加1秒确保不会错过
+                
                 # 等待一段时间后再次检查
-                await asyncio.sleep(60)  # 每分钟检查一次
+                await asyncio.sleep(wait_seconds)
                 
         except asyncio.CancelledError:
             self.logger.info("定时任务被取消")
@@ -693,10 +702,19 @@ class TimerManager:
         Returns:
             bool: 格式是否有效
         """
-        # 目前只支持简单格式 "HH:MM"
-        # 如果需要支持更复杂的cron表达式，可以添加相应的解析逻辑
-        pattern = r'^([01]?[0-9]|2[0-3]):[0-5][0-9]$'
-        return bool(re.match(pattern, time_str))
+        try:
+            # 首先尝试简单格式 "HH:MM"
+            simple_pattern = r'^([01]?[0-9]|2[0-3]):[0-5][0-9]$'
+            if re.match(simple_pattern, time_str):
+                return True
+                
+            # 尝试cron格式
+            # 使用croniter验证cron表达式
+            croniter(time_str)
+            return True
+        except Exception as e:
+            self.logger.debug(f"时间格式验证失败: {time_str}, 错误: {e}")
+            return False
     
     def _calculate_next_push_time(self, push_time: str) -> datetime:
         """计算下次推送时间
@@ -713,19 +731,24 @@ class TimerManager:
             # 获取当前时间
             now = datetime.now()
             
-            # 目前只支持简单格式 "HH:MM"
-            # 如果需要支持更复杂的cron表达式，可以添加相应的解析逻辑
-            if not ':' in push_time:
-                raise ValueError("不支持的时间格式")
-            
-            hour, minute = map(int, push_time.split(':'))
-            target_time = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
-            
-            # 如果今天的时间已过，则推到明天
-            if target_time <= now:
-                target_time += timedelta(days=1)
-            
-            return target_time
+            # 检查是否是简单格式 "HH:MM"
+            simple_pattern = r'^([01]?[0-9]|2[0-3]):[0-5][0-9]$'
+            if re.match(simple_pattern, push_time):
+                # 处理简单格式
+                hour, minute = map(int, push_time.split(':'))
+                target_time = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+                
+                # 如果今天的时间已过，则推到明天
+                if target_time <= now:
+                    target_time += timedelta(days=1)
+                
+                return target_time
+            else:
+                # 处理cron格式
+                # 使用croniter计算下次执行时间
+                cron = croniter(push_time, now)
+                next_time = cron.get_next(datetime)
+                return next_time
             
         except (ValueError, TypeError, OSError, IOError) as e:
             # 捕获计算推送时间时的数值、类型和系统错误
