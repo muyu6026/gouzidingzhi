@@ -3094,7 +3094,9 @@ class MessageStatsPlugin(Star):
             
             # 创建一个模拟的事件对象用于发送消息
             # 使用context.send_message发送消息
-            await self.context.send_message(unified_msg_origin, message)
+            from astrbot.api.event import MessageChain
+            message_chain = MessageChain().message(message)
+            await self.context.send_message(unified_msg_origin, message_chain)
             
             self.logger.info(f"已发送每周奖励消息到群组 {group_id}")
             
@@ -3247,6 +3249,9 @@ class MessageStatsPlugin(Star):
             unified_msg_origin: 消息发送目标
         """
         try:
+            # 导入MessageChain
+            from astrbot.api.event import MessageChain
+            
             # 获取消息内容
             message_content = None
             
@@ -3258,37 +3263,41 @@ class MessageStatsPlugin(Star):
                 # 如果有chain属性
                 message_content = result.chain
             elif isinstance(result, str):
-                # 如果是字符串
-                message_content = result
+                # 如果是字符串，创建MessageChain对象
+                message_content = MessageChain().message(result)
             elif isinstance(result, list):
                 # 如果是列表，尝试转换为字符串
                 try:
                     # 尝试将列表中的元素连接成字符串
-                    message_content = ''.join(str(item) for item in result)
+                    message_str = ''.join(str(item) for item in result)
+                    message_content = MessageChain().message(message_str)
                 except Exception:
                     # 如果连接失败，转换为字符串
-                    message_content = str(result)
+                    message_content = MessageChain().message(str(result))
             else:
                 # 尝试转换为字符串
-                message_content = str(result)
+                message_content = MessageChain().message(str(result))
             
             # 使用context.send_message发送消息
-            # 确保message_content是正确的消息链格式
-            if isinstance(message_content, str):
-                # 如果是字符串，直接发送字符串
-                await self.context.send_message(unified_msg_origin, message_content)
-            elif isinstance(message_content, list):
-                # 如果是列表，尝试转换为字符串
-                try:
-                    message_str = ''.join(str(item) for item in message_content)
-                    await self.context.send_message(unified_msg_origin, message_str)
-                except Exception:
-                    # 如果转换失败，尝试发送第一个元素
-                    if message_content:
-                        await self.context.send_message(unified_msg_origin, str(message_content[0]))
-            else:
-                # 如果是消息链对象，直接发送
-                await self.context.send_message(unified_msg_origin, message_content)
+            # 确保message_content是MessageChain对象
+            await self.context.send_message(unified_msg_origin, message_content)
                 
+        except AttributeError as e:
+            # 特殊处理AttributeError，特别是'str' object has no attribute 'chain'
+            if "'str' object has no attribute 'chain'" in str(e):
+                self.logger.error(f"处理消息结果失败(字符串对象错误): {e}", exc_info=True)
+                # 尝试将result转换为MessageChain并发送
+                try:
+                    from astrbot.api.event import MessageChain
+                    if isinstance(result, str):
+                        message_chain = MessageChain().message(result)
+                        await self.context.send_message(unified_msg_origin, message_chain)
+                    else:
+                        message_chain = MessageChain().message(str(result))
+                        await self.context.send_message(unified_msg_origin, message_chain)
+                except Exception as fallback_e:
+                    self.logger.error(f"发送消息失败(回退方案): {fallback_e}", exc_info=True)
+            else:
+                self.logger.error(f"处理消息结果失败(属性错误): {e}", exc_info=True)
         except Exception as e:
             self.logger.error(f"处理消息结果失败: {e}", exc_info=True)
