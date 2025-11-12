@@ -1,0 +1,750 @@
+"""
+数据模型定义
+定义插件中使用的所有数据结构
+
+此模块仅包含数据模型的定义，不包含业务逻辑或工具函数。
+工具函数已拆分到独立的模块中：
+- file_utils: 文件操作工具
+- date_utils: 日期时间处理工具
+"""
+
+from dataclasses import dataclass, field
+from datetime import datetime, date
+from typing import List, Optional, Dict, Any
+from enum import Enum
+
+# 使用框架的日志记录器 - 使用可选导入避免测试环境问题
+try:
+    from astrbot.api import logger
+except ImportError:
+    # 测试环境或导入失败时使用标准logging
+    import logging
+    logger = logging.getLogger(__name__)
+
+
+
+class RankType(Enum):
+    """排行榜类型枚举
+    
+    定义了插件支持的排行榜类型，包括总榜、日榜、周榜和月榜。
+    
+    Attributes:
+        TOTAL (str): 总排行榜，包含历史所有发言统计
+        DAILY (str): 日排行榜，仅包含当日发言统计
+        WEEKLY (str): 周排行榜，仅包含本周发言统计
+        MONTHLY (str): 月排行榜，仅包含本月发言统计
+        
+    Example:
+        >>> rank_type = RankType.TOTAL
+        >>> print(rank_type.value)
+        'total'
+    """
+    TOTAL = "total"
+    DAILY = "daily"
+    WEEKLY = "weekly"
+    MONTHLY = "monthly"
+
+
+@dataclass
+class MessageDate:
+    """消息日期记录
+    
+    用于记录消息的日期信息，支持与标准date对象的相互转换。
+    提供完整的比较和格式化功能。
+    
+    Attributes:
+        year (int): 年份
+        month (int): 月份
+        day (int): 日期
+        
+    Methods:
+        to_date(): 转换为标准date对象
+        to_datetime(): 转换为标准datetime对象
+        from_date(): 从date对象创建实例
+        from_datetime(): 从datetime对象创建实例
+        
+    Example:
+        >>> msg_date = MessageDate(2024, 1, 15)
+        >>> print(msg_date.to_date())
+        datetime.date(2024, 1, 15)
+    """
+    year: int
+    month: int
+    day: int
+    
+    def to_date(self) -> date:
+        """转换为date对象
+        
+        将MessageDate实例转换为Python标准库中的date对象。
+        
+        Returns:
+            date: 标准date对象，年月日信息相同
+            
+        Example:
+            >>> msg_date = MessageDate(2024, 1, 15)
+            >>> date_obj = msg_date.to_date()
+            >>> print(type(date_obj))
+            <class 'datetime.date'>
+        """
+        return date(self.year, self.month, self.day)
+    
+    def to_datetime(self) -> datetime:
+        """转换为datetime对象
+        
+        将MessageDate实例转换为Python标准库中的datetime对象。
+        时间部分将设置为00:00:00。
+        
+        Returns:
+            datetime: 标准datetime对象，时间部分为00:00:00
+            
+        Example:
+            >>> msg_date = MessageDate(2024, 1, 15)
+            >>> dt = msg_date.to_datetime()
+            >>> print(dt.time())
+            00:00:00
+        """
+        return datetime.combine(self.to_date(), datetime.min.time())
+    
+    @classmethod
+    def from_date(cls, date_obj: date):
+        """从date对象创建
+        
+        从Python标准库中的date对象创建MessageDate实例。
+        
+        Args:
+            date_obj (date): 标准date对象
+            
+        Returns:
+            MessageDate: 对应的MessageDate实例
+            
+        Example:
+            >>> from datetime import date
+            >>> d = date(2024, 1, 15)
+            >>> msg_date = MessageDate.from_date(d)
+            >>> print(msg_date.year)
+            2024
+        """
+        return cls(date_obj.year, date_obj.month, date_obj.day)
+    
+    @classmethod
+    def from_datetime(cls, datetime_obj: datetime):
+        """从datetime对象创建
+        
+        从Python标准库中的datetime对象创建MessageDate实例。
+        只使用日期部分，忽略时间部分。
+        
+        Args:
+            datetime_obj (datetime): 标准datetime对象
+            
+        Returns:
+            MessageDate: 对应的MessageDate实例
+            
+        Example:
+            >>> from datetime import datetime
+            >>> dt = datetime(2024, 1, 15, 14, 30, 0)
+            >>> msg_date = MessageDate.from_datetime(dt)
+            >>> print(msg_date)
+            2024-01-15
+        """
+        return cls.from_date(datetime_obj.date())
+    
+    def __str__(self) -> str:
+        return f"{self.year}-{self.month:02d}-{self.day:02d}"
+    
+    def __eq__(self, other) -> bool:
+        if not isinstance(other, MessageDate):
+            return NotImplemented
+        return (self.year == other.year and 
+                self.month == other.month and 
+                self.day == other.day)
+    
+    def __lt__(self, other) -> bool:
+        if not isinstance(other, MessageDate):
+            return NotImplemented
+        return (self.year, self.month, self.day) < (other.year, other.month, other.day)
+
+
+@dataclass
+class UserData:
+    """用户数据
+    
+    存储用户在群组中的发言统计数据和Rbot游戏数据，包括用户信息、发言总数、
+    修为、阅历、积分等。支持数据序列化和反序列化，便于JSON存储。
+    
+    Attributes:
+        user_id (str): 用户唯一标识符
+        nickname (str): 用户昵称
+        message_count (int): 总发言次数，默认为0
+        history (List[MessageDate]): 发言日期历史记录列表
+        last_date (Optional[str]): 最后发言日期的字符串表示
+        first_message_time (Optional[int]): 首次发言时间戳
+        last_message_time (Optional[int]): 最后发言时间戳
+        # Rbot功能相关属性
+        cultivation (int): 修为值，默认为0
+        experience (int): 阅历值，默认为0（每周清理一次）
+        spirit_stones (int): 灵石数量，默认为0
+        points (int): 积分数量，默认为0
+        last_sign_date (Optional[str]): 最后签到日期，用于防止重复签到
+        total_sign_days (int): 总签到天数，默认为0
+        
+    Methods:
+        add_message(): 添加新的消息记录
+        get_last_message_date(): 获取最后发言日期
+        get_message_count_in_period(): 获取指定时间段内的发言数量
+        to_dict(): 转换为字典格式
+        from_dict(): 从字典创建实例
+        sign_today(): 执行今日签到
+        can_sign_today(): 检查今日是否可以签到
+        
+    Example:
+        >>> user = UserData("123456", "用户昵称")
+        >>> user.add_message(MessageDate(2024, 1, 15))
+        >>> print(user.message_count)
+        1
+    """
+    user_id: str
+    nickname: str
+    message_count: int = 0
+    history: List[MessageDate] = field(default_factory=list)
+    last_date: Optional[str] = None
+    first_message_time: Optional[int] = None
+    last_message_time: Optional[int] = None
+    # Rbot功能相关属性
+    cultivation: int = 0  # 修为值
+    experience: int = 0  # 阅历值（每周清理一次）
+    spirit_stones: int = 0  # 灵石数量
+    points: int = 0  # 积分数量
+    last_sign_date: Optional[str] = None  # 最后签到日期
+    total_sign_days: int = 0  # 总签到天数
+    
+    def add_message(self, message_date: MessageDate):
+        """添加消息记录
+        
+        增加用户的发言计数并记录发言日期。每次发言都会记录到历史中，
+        保持message_count字段与实际发言次数的一致性。
+        
+        Args:
+            message_date (MessageDate): 消息日期对象
+            
+        Returns:
+            None: 无返回值，直接修改对象状态
+            
+        Example:
+            >>> user = UserData("123", "用户")
+            >>> user.add_message(MessageDate(2024, 1, 15))
+            >>> print(user.message_count)
+            1
+        """
+        self.message_count += 1
+        
+        # 每次发言都添加到历史记录中
+        self.history.append(message_date)
+        
+        # 更新最后发言日期
+        self.last_date = str(message_date)
+    
+    def get_last_message_date(self) -> Optional[MessageDate]:
+        """获取最后消息日期
+        
+        返回用户最后一次发言的日期，如果无发言记录则返回None。
+        
+        Returns:
+            Optional[MessageDate]: 最后发言日期，如果无记录则返回None
+            
+        Example:
+            >>> user = UserData("123", "用户")
+            >>> user.add_message(MessageDate(2024, 1, 15))
+            >>> last_date = user.get_last_message_date()
+            >>> print(last_date.year)
+            2024
+        """
+        return self.history[-1] if self.history else None
+    
+    def get_message_count_in_period(self, start_date: date, end_date: date) -> int:
+        """获取指定时间段内的消息数量
+        
+        计算用户在指定日期范围内的发言次数。
+        
+        Args:
+            start_date (date): 开始日期（包含）
+            end_date (date): 结束日期（包含）
+            
+        Returns:
+            int: 指定时间段内的发言次数
+            
+        Example:
+            >>> user = UserData("123", "用户")
+            >>> user.add_message(MessageDate(2024, 1, 15))
+            >>> user.add_message(MessageDate(2024, 1, 16))
+            >>> count = user.get_message_count_in_period(date(2024, 1, 1), date(2024, 1, 31))
+            >>> print(count)
+            2
+        """
+        count = 0
+        for hist_date in self.history:
+            if start_date <= hist_date.to_date() <= end_date:
+                count += 1
+        return count
+    
+    def sign_today(self) -> tuple[bool, str, int, int]:
+        """执行今日签到
+        
+        执行签到操作，增加灵石和修为，并记录签到日期。
+        
+        Returns:
+            tuple[bool, str, int, int]: 签到结果元组，包含：
+                - 是否签到成功
+                - 结果消息
+                - 获得的灵石数量
+                - 获得的修为数量
+                
+        Example:
+            >>> user = UserData("123", "用户")
+            >>> success, msg, stones, cultivation = user.sign_today()
+            >>> print(f"签到成功: {success}, 获得灵石: {stones}")
+        """
+        from datetime import date
+        today = str(date.today())
+        
+        # 检查今日是否已签到
+        if self.last_sign_date == today:
+            return False, "签到失败，请第二天再签到", 0, 0
+        
+        # 随机获得5-10个灵石
+        import random
+        spirit_stones_gain = random.randint(5, 10)
+        cultivation_gain = 10
+        
+        # 更新数据
+        self.spirit_stones += spirit_stones_gain
+        self.cultivation += cultivation_gain
+        self.last_sign_date = today
+        self.total_sign_days += 1
+        
+        return True, f"本次签到成功，灵石+{spirit_stones_gain}，修为+{cultivation_gain}", spirit_stones_gain, cultivation_gain
+    
+    def can_sign_today(self) -> bool:
+        """检查今日是否可以签到
+        
+        Returns:
+            bool: 今日是否可以签到
+            
+        Example:
+            >>> user = UserData("123", "用户")
+            >>> can_sign = user.can_sign_today()
+            >>> print(f"今日可签到: {can_sign}")
+        """
+        from datetime import date
+        today = str(date.today())
+        return self.last_sign_date != today
+    
+    def add_cultivation(self, amount: int):
+        """增加修为
+        
+        Args:
+            amount (int): 增加的修为数量，可以是负数
+        """
+        self.cultivation += amount
+        # 确保修为不为负数
+        if self.cultivation < 0:
+            self.cultivation = 0
+    
+    def add_experience(self, amount: int):
+        """增加阅历
+        
+        Args:
+            amount (int): 增加的阅历数量，可以是负数
+        """
+        self.experience += amount
+        # 确保阅历不为负数
+        if self.experience < 0:
+            self.experience = 0
+    
+    def add_spirit_stones(self, amount: int):
+        """增加灵石
+        
+        Args:
+            amount (int): 增加的灵石数量，可以是负数
+        """
+        self.spirit_stones += amount
+        # 确保灵石不为负数
+        if self.spirit_stones < 0:
+            self.spirit_stones = 0
+    
+    def add_points(self, amount: int):
+        """增加积分
+        
+        Args:
+            amount (int): 增加的积分数量，可以是负数
+        """
+        self.points += amount
+        # 确保积分不为负数
+        if self.points < 0:
+            self.points = 0
+    
+    def reset_experience(self):
+        """重置阅历（用于每周清理）"""
+        self.experience = 0
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """转换为字典
+        
+        将UserData实例转换为字典格式，便于JSON序列化。
+        
+        Returns:
+            Dict[str, Any]: 包含用户数据的字典，包括：
+                - user_id: 用户ID
+                - nickname: 用户昵称
+                - message_count: 总发言次数
+                - history: 发言日期历史（字符串列表）
+                - last_date: 最后发言日期
+                - first_message_time: 首次发言时间戳
+                - last_message_time: 最后发言时间戳
+                - cultivation: 修为值
+                - experience: 阅历值
+                - spirit_stones: 灵石数量
+                - points: 积分数量
+                - last_sign_date: 最后签到日期
+                - total_sign_days: 总签到天数
+                
+        Example:
+            >>> user = UserData("123", "用户")
+            >>> data = user.to_dict()
+            >>> print(data['nickname'])
+            '用户'
+        """
+        return {
+            "user_id": self.user_id,
+            "nickname": self.nickname,
+            "message_count": self.message_count,
+            "history": [str(h) for h in self.history],
+            "last_date": self.last_date,
+            "first_message_time": self.first_message_time,
+            "last_message_time": self.last_message_time,
+            "cultivation": self.cultivation,
+            "experience": self.experience,
+            "spirit_stones": self.spirit_stones,
+            "points": self.points,
+            "last_sign_date": self.last_sign_date,
+            "total_sign_days": self.total_sign_days
+        }
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'UserData':
+        """从字典创建
+        
+        从字典数据创建UserData实例，自动重建发言历史记录和Rbot功能数据。
+        
+        Args:
+            data (Dict[str, Any]): 用户数据字典，必须包含user_id和nickname字段
+            
+        Returns:
+            UserData: 对应的UserData实例
+            
+        Raises:
+            KeyError: 当缺少必需字段时抛出
+            ValueError: 当数据格式错误时抛出
+            
+        Example:
+            >>> data = {"user_id": "123", "nickname": "用户", "message_count": 5}
+            >>> user = UserData.from_dict(data)
+            >>> print(user.user_id)
+            '123'
+        """
+        user_data = cls(
+            user_id=data["user_id"],
+            nickname=data["nickname"],
+            message_count=data.get("message_count", 0),
+            last_date=data.get("last_date"),
+            first_message_time=data.get("first_message_time"),
+            last_message_time=data.get("last_message_time"),
+            # Rbot功能相关属性
+            cultivation=data.get("cultivation", 0),
+            experience=data.get("experience", 0),
+            spirit_stones=data.get("spirit_stones", 0),
+            points=data.get("points", 0),
+            last_sign_date=data.get("last_sign_date"),
+            total_sign_days=data.get("total_sign_days", 0)
+        )
+        
+        # 重建history
+        if "history" in data:
+            try:
+                for hist_str in data["history"]:
+                    try:
+                        year, month, day = map(int, hist_str.split('-'))
+                        user_data.history.append(MessageDate(year, month, day))
+                    except (ValueError, IndexError) as e:
+                        # 跳过格式错误的日期记录，但记录警告
+                        logger.warning(f"跳过格式错误的日期记录 '{hist_str}': {e}")
+                        continue
+            except TypeError as e:
+                # 如果history不是可迭代对象，跳过但记录更详细的警告
+                logger.warning(f"history字段类型错误，不是可迭代对象: {type(data.get('history'))}, 错误: {e}")
+                # 不使用pass，而是记录具体的错误信息
+        
+        return user_data
+    
+    def __lt__(self, other) -> bool:
+        """按总消息数排序"""
+        if not isinstance(other, UserData):
+            return NotImplemented
+        return self.message_count < other.message_count  # 升序排列，用于sorted()函数
+
+
+class PluginConfig:
+    """插件基本配置
+    
+    存储插件的基本配置参数，包括显示设置、权限控制、日志管理和Rbot功能配置。
+    支持数据序列化和反序列化，便于配置文件的读写。
+    
+    Attributes:
+        is_admin_restricted (int): 是否限制管理员操作，0为不限制，1为限制
+        rand (int): 排行榜显示人数，默认为20人
+        if_send_pic (int): 是否发送图片，0为文字模式，1为图片模式（与Web Schema一致）
+        auto_record_enabled (bool): 是否开启自动记录群成员发言统计
+        detailed_logging_enabled (bool): 是否开启详细日志记录，关闭后隐藏"记录消息统计"等详细日志
+        timer_enabled (bool): 是否启用定时推送功能
+        timer_push_time (str): 定时推送时间（支持HH:MM或cron格式，如"09:00"或"0 9 * * *"）
+        timer_target_groups (List[str]): 定时推送目标群组ID列表
+        timer_rank_type (str): 定时推送的排行榜类型
+        # Rbot功能配置
+        rbot_enabled (bool): 是否启用Rbot功能，默认为True
+        rbot_enabled_groups (List[str]): Rbot功能生效的群组ID列表，为空表示所有群组
+        rbot_admin_users (List[str]): Rbot功能管理员用户ID列表，可以修改修为阅历积分
+        rbot_weekly_reset_day (int): 每周重置阅历的星期几，0-6对应周一到周日，默认为0（周一）
+        
+    Methods:
+        to_dict(): 转换为字典格式
+        from_dict(): 从字典创建实例
+        
+    Example:
+        >>> config = PluginConfig()
+        >>> config.rand = 15
+        >>> config.detailed_logging_enabled = False  # 隐藏详细日志
+    """
+    def __init__(self):
+        self.is_admin_restricted = 0
+        self.rand = 20
+        self.if_send_pic = 1
+        self.auto_record_enabled = True
+        self.detailed_logging_enabled = True  # 默认开启详细日志，便于调试
+        
+        # 定时功能配置
+        self.timer_enabled = False
+        self.timer_push_time = "09:00"
+        self.timer_target_groups = []
+        self.timer_rank_type = "daily"  # 默认推送今日排行榜
+        
+        # Rbot功能配置
+        self.rbot_enabled = True  # 默认启用Rbot功能
+        self.rbot_enabled_groups = []  # 为空表示所有群组都启用
+        self.rbot_admin_users = []  # Rbot功能管理员用户ID列表
+        self.rbot_weekly_reset_day = 0  # 每周一重置阅历
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """转换为字典
+        
+        将PluginConfig实例转换为字典格式，便于JSON序列化。
+        与Web Schema保持一致的字段名，确保配置能够正确加载。
+        
+        Returns:
+            Dict[str, Any]: 包含所有配置数据的字典，包括：
+                - is_admin_restricted: 管理员限制设置
+                - rand: 排行榜显示人数
+                - if_send_pic: 图片模式设置（与Schema一致）
+                - auto_record_enabled: 自动记录开关
+                - detailed_logging_enabled: 详细日志开关
+                - timer_enabled: 定时功能开关
+                - timer_push_time: 定时推送时间
+                - timer_target_groups: 定时推送群组
+                - timer_rank_type: 定时推送排行榜类型
+                - rbot_enabled: Rbot功能开关
+                - rbot_enabled_groups: Rbot功能生效群组
+                - rbot_admin_users: Rbot功能管理员用户ID列表
+                - rbot_weekly_reset_day: 每周重置阅历的星期几
+                
+        Example:
+            >>> config = PluginConfig()
+            >>> data = config.to_dict()
+            >>> print(data['rand'])
+            20
+        """
+        return {
+            "is_admin_restricted": self.is_admin_restricted,
+            "rand": self.rand,
+            "if_send_pic": self.if_send_pic,
+            "auto_record_enabled": self.auto_record_enabled,
+            "detailed_logging_enabled": self.detailed_logging_enabled,
+            "timer_enabled": self.timer_enabled,
+            "timer_push_time": self.timer_push_time,
+            "timer_target_groups": self.timer_target_groups,
+            "timer_rank_type": self.timer_rank_type,
+            "rbot_enabled": self.rbot_enabled,
+            "rbot_enabled_groups": self.rbot_enabled_groups,
+            "rbot_admin_users": self.rbot_admin_users,
+            "rbot_weekly_reset_day": self.rbot_weekly_reset_day
+        }
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'PluginConfig':
+        """从字典创建基本配置
+        
+        从字典数据创建PluginConfig实例，使用默认值填充缺失字段。
+        支持字段名映射，兼容旧版本配置格式。
+        
+        Args:
+            data (Dict[str, Any]): 配置数据字典，可能包含：
+                - is_admin_restricted: 管理员限制设置
+                - rand: 排行榜显示人数
+                - if_send_pic: 图片模式设置（标准字段）
+                - send_pic: 图片模式设置（旧版本字段，兼容）
+                - auto_record_enabled: 自动记录开关
+                - detailed_logging_enabled: 详细日志开关
+                - timer_enabled: 定时功能开关
+                - timer_push_time: 定时推送时间
+                - timer_target_groups: 定时推送群组
+                - timer_rank_type: 定时推送排行榜类型
+                - rbot_enabled: Rbot功能开关
+                - rbot_enabled_groups: Rbot功能生效群组
+                - rbot_admin_users: Rbot功能管理员用户ID列表
+                - rbot_weekly_reset_day: 每周重置阅历的星期几
+            
+        Returns:
+            PluginConfig: 对应的PluginConfig实例
+            
+        Example:
+            >>> data = {"rand": 15, "if_send_pic": 0}
+            >>> config = PluginConfig.from_dict(data)
+            >>> print(config.rand)
+            15
+        """
+        # 创建默认实例
+        config = cls()
+        
+        # 支持字段名映射 - if_send_pic是标准字段，send_pic是兼容字段
+        if_send_pic = data.get("if_send_pic", data.get("send_pic", 1))
+        
+        # 设置配置值
+        config.is_admin_restricted = data.get("is_admin_restricted", 0)
+        config.rand = data.get("rand", 20)
+        config.if_send_pic = if_send_pic
+        config.auto_record_enabled = data.get("auto_record_enabled", True)
+        config.detailed_logging_enabled = data.get("detailed_logging_enabled", True)
+        config.timer_enabled = data.get("timer_enabled", False)
+        config.timer_push_time = data.get("timer_push_time", "09:00")
+        config.timer_target_groups = data.get("timer_target_groups", [])
+        config.timer_rank_type = data.get("timer_rank_type", "daily")
+        
+        # Rbot功能配置
+        config.rbot_enabled = data.get("rbot_enabled", True)
+        config.rbot_enabled_groups = data.get("rbot_enabled_groups", [])
+        config.rbot_admin_users = data.get("rbot_admin_users", [])
+        config.rbot_weekly_reset_day = data.get("rbot_weekly_reset_day", 0)
+        
+        return config
+
+
+@dataclass
+class GroupInfo:
+    """群组信息
+    
+    存储群组的基本信息，包括群ID、群名称和成员数量。
+    用于排行榜显示和群组识别。
+    
+    Attributes:
+        group_id (str): 群组唯一标识符
+        group_name (str): 群组名称，默认为空字符串
+        member_count (int): 群组成员数量，默认为0
+        
+    Methods:
+        to_dict(): 转换为字典格式
+        
+    Example:
+        >>> group = GroupInfo("123456789", "测试群", 50)
+        >>> print(group.group_name)
+        '测试群'
+    """
+    group_id: str
+    group_name: str = ""
+    member_count: int = 0
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """转换为字典
+        
+        将GroupInfo实例转换为字典格式，便于JSON序列化。
+        
+        Returns:
+            Dict[str, Any]: 包含群组信息的字典，包括：
+                - group_id: 群组ID
+                - group_name: 群组名称
+                - member_count: 成员数量
+                
+        Example:
+            >>> group = GroupInfo("123", "测试群")
+            >>> data = group.to_dict()
+            >>> print(data['group_name'])
+            '测试群'
+        """
+        return {
+            "group_id": self.group_id,
+            "group_name": self.group_name,
+            "member_count": self.member_count
+        }
+
+
+@dataclass
+class RankData:
+    """排行榜数据
+    
+    存储完整的排行榜信息，包括群组信息、标题、用户数据和统计信息。
+    用于排行榜的生成和显示。
+    
+    Attributes:
+        group_info (GroupInfo): 群组信息对象
+        title (str): 排行榜标题
+        users (List[UserData]): 用户数据列表
+        total_messages (int): 总消息数
+        generated_at (datetime): 生成时间，默认为当前时间
+        
+    Methods:
+        to_dict(): 转换为字典格式
+        
+    Example:
+        >>> group_info = GroupInfo("123", "测试群")
+        >>> rank_data = RankData(group_info, "排行榜", [], 100)
+        >>> print(rank_data.title)
+        '排行榜'
+    """
+    group_info: GroupInfo
+    title: str
+    users: List[UserData]
+    total_messages: int
+    generated_at: datetime = field(default_factory=datetime.now)
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """转换为字典
+        
+        将RankData实例转换为字典格式，便于JSON序列化。
+        
+        Returns:
+            Dict[str, Any]: 包含排行榜数据的字典，包括：
+                - group_info: 群组信息字典
+                - title: 排行榜标题
+                - users: 用户数据字典列表
+                - total_messages: 总消息数
+                - generated_at: 生成时间（ISO格式字符串）
+                
+        Example:
+            >>> rank_data = RankData(group_info, "排行榜", [], 100)
+            >>> data = rank_data.to_dict()
+            >>> print(data['title'])
+            '排行榜'
+        """
+        return {
+            "group_info": self.group_info.to_dict(),
+            "title": self.title,
+            "users": [user.to_dict() for user in self.users],
+            "total_messages": self.total_messages,
+            "generated_at": self.generated_at.isoformat()
+        }
