@@ -3197,6 +3197,14 @@ class MessageStatsPlugin(Star):
             elif isinstance(result, str):
                 # 如果是字符串
                 message_content = result
+            elif isinstance(result, list):
+                # 如果是列表，尝试转换为字符串
+                try:
+                    # 尝试将列表中的元素连接成字符串
+                    message_content = ''.join(str(item) for item in result)
+                except Exception:
+                    # 如果连接失败，转换为字符串
+                    message_content = str(result)
             else:
                 # 尝试转换为字符串
                 message_content = str(result)
