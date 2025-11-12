@@ -536,17 +536,17 @@ class MessageStatsPlugin(Star):
                         await asyncio.sleep(3600)
             
             async def daily_sign_in_reset_task():
-                """每日重置签到状态的循环任务"""
+                """每日重置签到状态的循环任务（凌晨0点执行）"""
                 while True:
                     try:
-                        # 每小时检查一次是否需要重置签到状态
+                        # 每分钟检查一次是否需要重置签到状态
                         await self._daily_sign_in_reset()
-                        # 等待1小时
-                        await asyncio.sleep(3600)
+                        # 等待1分钟
+                        await asyncio.sleep(60)
                     except Exception as e:
                         self.logger.error(f"每日签到状态重置任务出错: {e}")
-                        # 出错后等待1小时再重试
-                        await asyncio.sleep(3600)
+                        # 出错后等待1分钟再重试
+                        await asyncio.sleep(60)
             
             # 启动定时任务（不阻塞初始化过程）
             asyncio.create_task(weekly_reset_task())
@@ -2929,12 +2929,19 @@ class MessageStatsPlugin(Star):
             self.logger.error(f"设置签到状态失败: {e}", exc_info=True)
     
     async def _daily_sign_in_reset(self):
-        """每日重置签到状态的定时任务"""
+        """每日重置签到状态的定时任务（凌晨0点执行）"""
         try:
-            from datetime import datetime
+            from datetime import datetime, timedelta
+            
+            # 获取当前时间
+            now = datetime.now()
+            
+            # 检查是否是凌晨0点（允许1分钟的误差）
+            if now.hour != 0 or now.minute > 1:
+                return  # 不是凌晨0点，不执行重置
             
             # 获取今天的日期字符串
-            today = datetime.now().strftime("%Y-%m-%d")
+            today = now.strftime("%Y-%m-%d")
             
             # 检查是否已经执行过重置（避免一天内多次执行）
             reset_key = "last_sign_in_reset"
@@ -2946,24 +2953,34 @@ class MessageStatsPlugin(Star):
             if last_reset_date == today:
                 return  # 今天已经重置过了
             
-            # 清理过期的签到状态（保留最近7天的记录）
+            # 清理所有昨天的签到状态（重置为False）
             sign_in_data = JsonHandler.读取Json字典("sign_in_status.json")
             
-            # 计算保留的日期范围
-            from datetime import timedelta
-            keep_date = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
+            # 计算昨天的日期
+            yesterday = (now - timedelta(days=1)).strftime("%Y-%m-%d")
             
-            # 创建新的签到状态字典，只保留最近7天的记录
+            # 重置昨天所有的签到状态为False
+            reset_count = 0
+            for key in list(sign_in_data.keys()):
+                # 键格式：群组ID_用户ID_日期
+                parts = key.split('_')
+                if len(parts) >= 3:
+                    date_part = parts[-1]
+                    if date_part == yesterday:
+                        sign_in_data[key] = False
+                        reset_count += 1
+            
+            # 清理超过7天的旧数据
+            keep_date = (now - timedelta(days=7)).strftime("%Y-%m-%d")
             new_sign_in_data = {}
             for key, value in sign_in_data.items():
-                # 键格式：群组ID_用户ID_日期
                 parts = key.split('_')
                 if len(parts) >= 3:
                     date_part = parts[-1]
                     if date_part >= keep_date:
                         new_sign_in_data[key] = value
             
-            # 保存清理后的签到状态
+            # 保存更新后的签到状态
             try:
                 JsonHandler.写入Json字典("sign_in_status.json", new_sign_in_data)
             except Exception as e:
@@ -2974,7 +2991,7 @@ class MessageStatsPlugin(Star):
             setattr(config, reset_key, today)
             await self.data_manager.save_config(config)
             
-            self.logger.info(f"每日签到状态重置完成，清理了过期数据")
+            self.logger.info(f"每日签到状态重置完成（凌晨0点），重置了 {reset_count} 个用户的签到状态")
             
         except Exception as e:
             self.logger.error(f"每日签到状态重置失败: {e}", exc_info=True)
