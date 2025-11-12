@@ -585,14 +585,16 @@ class TimerManager:
         # 生成标题
         title = self._generate_title(rank_type)
         
-        # 定时推送只发送图片版本
+        # 定时推送尝试发送图片版本
         image_path = await self._generate_rank_image(users_for_rank, group_info, title, config)
         if not image_path:
-            self.logger.warning(f"群组 {group_id} 图片生成失败")
-            return False
-        
-        # 定时推送只发送图片，不发送文字消息
-        success = await self.push_service.push_to_group(group_id, "", image_path)
+            self.logger.warning(f"群组 {group_id} 图片生成失败，降级到文字模式")
+            # 降级到文字模式
+            text_message = self._generate_text_message([(user, getattr(user, 'display_total', user.message_count)) for user in users_for_rank], group_info, title, config)
+            success = await self.push_service.push_to_group(group_id, text_message, None)
+        else:
+            # 定时推送只发送图片，不发送文字消息
+            success = await self.push_service.push_to_group(group_id, "", image_path)
         
         # 清理临时图片文件
         if image_path and await aiofiles.os.path.exists(image_path):
@@ -618,6 +620,7 @@ class TimerManager:
         """
         try:
             if not self.image_generator:
+                self.logger.warning("图片生成器未初始化，无法生成图片")
                 return None
             
             # 使用图片生成器生成图片
@@ -629,6 +632,8 @@ class TimerManager:
             
         except Exception as e:
             self.logger.error(f"生成排行榜图片失败: {e}")
+            self.logger.warning("💡 提示: 如果需要图片功能，请运行 'playwright install' 命令安装浏览器")
+            self.logger.warning("📝 注意: 即使图片功能不可用，排行榜仍会以文字模式显示")
             return None
     
     def _validate_timer_config(self, config) -> bool:
@@ -858,7 +863,7 @@ class TimerManager:
         # 数据已经在_show_rank中排好序，直接使用并限制数量
         top_users = users_with_values[:config.rand]
         
-        msg = [f"{title}\n发言总数: {total_messages}\n━━━━━━━━━━━━━━\n"]
+        msg = [f"🏆 {title} 🏆\n━━━━━━━━━━━━━━\n"]
         
         for i, (user, user_messages) in enumerate(top_users):
             # 使用时间段内的发言数计算百分比
@@ -872,9 +877,9 @@ class TimerManager:
             elif i == 2:
                 emoji = "🥉"
             else:
-                emoji = f"{i + 1}."
+                emoji = f"第{i+1}名"
             
-            msg.append(f"{emoji} {user.nickname}·{user_messages}次(占比{percentage:.2f}%)\n")
+            msg.append(f"{emoji}：{user.nickname} - {user_messages}次 (占比{percentage:.2f}%)\n")
         
         # 添加推送标识
         msg.append(f"\n🤖 定时推送 | {datetime.now().strftime('%Y-%m-%d %H:%M')}")
