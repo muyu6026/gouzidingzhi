@@ -630,11 +630,6 @@ class MessageStatsPlugin(Star):
         if not self.plugin_config or not getattr(self.plugin_config, 'auto_record_enabled', True):
             return
             
-        # 跳过命令消息
-        message_str = getattr(event, 'message_str', '')
-        if message_str.startswith(('%', '/')):
-            return
-        
         # 获取基本信息
         group_id = event.get_group_id()
         user_id = event.get_sender_id()
@@ -651,12 +646,25 @@ class MessageStatsPlugin(Star):
         # 收集群组的unified_msg_origin（重要：用于定时推送）
         await self._collect_group_unified_msg_origin(event)
         
+        # 获取消息内容
+        message_str = getattr(event, 'message_str', '')
+        
+        # 检查是否是Rbot命令（不艾特机器人的情况）
+        if self._is_rbot_enabled_for_group(group_id):
+            # 处理Rbot命令
+            await self._process_rbot_commands(event, group_id, user_id, message_str)
+        
+        # 跳过命令消息（以%或/开头）
+        if message_str.startswith(('%', '/')):
+            return
+        
         # 获取用户昵称并记录统计
         nickname = await self._get_user_display_name(event, group_id, user_id)
         await self._record_message_stats(group_id, user_id, nickname)
         
-        # Rbot功能：处理修为和阅历增加
-        await self._process_rbot_message_rewards(group_id, user_id, nickname)
+        # Rbot功能：处理修为和阅历增加（仅在配置的群组中生效）
+        if self._is_rbot_enabled_for_group(group_id):
+            await self._process_rbot_message_rewards(group_id, user_id, nickname)
     
     def _is_bot_message(self, event: AstrMessageEvent, user_id: str) -> bool:
         """检查是否为机器人消息"""
@@ -1309,10 +1317,22 @@ class MessageStatsPlugin(Star):
         cache_key = f"group_members_{group_id}"
         
         if cache_key in self.group_members_cache:
-            return self.group_members_cache[cache_key]
-        else:
-            # 缓存未命中,从API获取
-            return await self._fetch_group_members_from_api(event, group_id)
+            cache_data = self.group_members_cache[cache_key]
+            
+            # 检查缓存是否过期
+            import time
+            if isinstance(cache_data, dict) and 'timestamp' in cache_data and 'ttl' in cache_data:
+                if time.time() - cache_data['timestamp'] < cache_data['ttl']:
+                    return cache_data['members']
+                else:
+                    # 缓存过期，删除
+                    del self.group_members_cache[cache_key]
+            else:
+                # 兼容旧格式缓存
+                return cache_data
+        
+        # 缓存未命中或已过期,从API获取
+        return await self._fetch_group_members_from_api(event, group_id)
     
     async def _fetch_group_members_from_api(self, event: AstrMessageEvent, group_id: str) -> Optional[List[Dict[str, Any]]]:
         """从API获取群成员"""
@@ -1322,13 +1342,29 @@ class MessageStatsPlugin(Star):
         try:
             members_info = await client.api.call_action('get_group_member_list', **params)
             if members_info:
-                # 缓存群成员列表,设置合理的过期时间
+                # 缓存群成员列表,根据群大小设置不同的过期时间
                 cache_key = f"group_members_{group_id}"
-                self.group_members_cache[cache_key] = members_info
                 
-                # 对于大群(成员数>500),记录警告
+                # 对于大群(成员数>500),使用更长的缓存时间
                 if len(members_info) > 500:
-                    self.logger.warning(f"群 {group_id} 成员数较多({len(members_info)}),建议调整缓存策略")
+                    # 大群使用30分钟缓存，记录缓存时间戳
+                    import time
+                    cache_data = {
+                        'members': members_info,
+                        'timestamp': time.time(),
+                        'ttl': 1800  # 30分钟
+                    }
+                    self.group_members_cache[cache_key] = cache_data
+                    self.logger.info(f"群 {group_id} 成员数较多({len(members_info)}),已启用30分钟缓存策略")
+                else:
+                    # 普通群组使用5分钟缓存，记录缓存时间戳
+                    import time
+                    cache_data = {
+                        'members': members_info,
+                        'timestamp': time.time(),
+                        'ttl': 300  # 5分钟
+                    }
+                    self.group_members_cache[cache_key] = cache_data
                 
                 return members_info
         except (AttributeError, KeyError, TypeError) as e:
@@ -2321,13 +2357,13 @@ class MessageStatsPlugin(Star):
             experience_sorted = sorted(users, key=lambda x: x.experience, reverse=True)
             
             # 生成排行榜消息
-            rank_msg = "修为排行榜\n━━━━━━━━━━━━━━\n"
+            rank_msg = "🏆 修为排行榜 🏆\n━━━━━━━━━━━━━━\n"
             for i, user in enumerate(cultivation_sorted[:10], 1):
-                rank_msg += f"{i}. {user.nickname}：{user.cultivation}修为\n"
+                rank_msg += f"🥇 第{i}名：{user.nickname} - {user.cultivation}修为\n"
             
-            rank_msg += "\n阅历排行榜\n━━━━━━━━━━━━━━\n"
+            rank_msg += "\n📚 阅历排行榜 📚\n━━━━━━━━━━━━━━\n"
             for i, user in enumerate(experience_sorted[:10], 1):
-                rank_msg += f"{i}. {user.nickname}：{user.experience}阅历\n"
+                rank_msg += f"📖 第{i}名：{user.nickname} - {user.experience}阅历\n"
             
             yield event.plain_result(rank_msg)
             
@@ -2368,9 +2404,19 @@ class MessageStatsPlugin(Star):
             sorted_users = sorted(users, key=lambda x: x.cultivation, reverse=True)
             
             # 生成排行榜消息
-            rank_msg = "修为排行榜\n━━━━━━━━━━━━━━\n"
+            rank_msg = "🏆 修为排行榜 🏆\n━━━━━━━━━━━━━━\n"
             for i, user in enumerate(sorted_users[:10], 1):
-                rank_msg += f"{i}. {user.nickname}：{user.cultivation}修为\n"
+                # 添加排名图标
+                if i == 1:
+                    icon = "🥇"
+                elif i == 2:
+                    icon = "🥈"
+                elif i == 3:
+                    icon = "🥉"
+                else:
+                    icon = f"第{i}名"
+                
+                rank_msg += f"{icon}：{user.nickname} - {user.cultivation}修为\n"
             
             yield event.plain_result(rank_msg)
             
@@ -2411,9 +2457,19 @@ class MessageStatsPlugin(Star):
             sorted_users = sorted(users, key=lambda x: x.experience, reverse=True)
             
             # 生成排行榜消息
-            rank_msg = "阅历排行榜\n━━━━━━━━━━━━━━\n"
+            rank_msg = "📚 阅历排行榜 📚\n━━━━━━━━━━━━━━\n"
             for i, user in enumerate(sorted_users[:10], 1):
-                rank_msg += f"{i}. {user.nickname}：{user.experience}阅历\n"
+                # 添加排名图标
+                if i == 1:
+                    icon = "🥇"
+                elif i == 2:
+                    icon = "🥈"
+                elif i == 3:
+                    icon = "🥉"
+                else:
+                    icon = f"第{i}名"
+                
+                rank_msg += f"{icon}：{user.nickname} - {user.experience}阅历\n"
             
             yield event.plain_result(rank_msg)
             
@@ -2462,19 +2518,22 @@ class MessageStatsPlugin(Star):
                 await self.data_manager.save_group_data(group_id, users)
             
             # 生成个人信息消息
-            info_msg = f"{user.nickname}\n"
-            info_msg += f"修为：{user.cultivation}\n"
-            info_msg += f"阅历：{user.experience}\n"
-            info_msg += f"积分：{user.points}\n"
-            info_msg += f"灵石：{user.spirit_stones}\n"
-            info_msg += f"签到天数：{user.total_sign_days}\n"
-            info_msg += "————————\n"
-            info_msg += "帮助\n"
-            info_msg += "签到功能：发送「我要签到」或「为狗子打call」\n"
-            info_msg += "查询信息：发送「查看个人信息」\n"
-            info_msg += "管理员功能：@用户 修为+100（设置修为）\n"
-            info_msg += "管理员功能：@用户 阅历+100（设置阅历）\n"
-            info_msg += "管理员功能：@用户 积分+100（设置积分）"
+            info_msg = f"👤 {user.nickname} 的个人信息 👤\n"
+            info_msg += "━━━━━━━━━━━━━━\n"
+            info_msg += f"⚔️ 修为：{user.cultivation}\n"
+            info_msg += f"📚 阅历：{user.experience}\n"
+            info_msg += f"💎 积分：{user.points}\n"
+            info_msg += f"💰 灵石：{user.spirit_stones}\n"
+            info_msg += f"📅 签到天数：{user.total_sign_days}\n"
+            info_msg += "━━━━━━━━━━━━━━\n"
+            info_msg += "📖 功能帮助 📖\n"
+            info_msg += "━━━━━━━━━━━━━━\n"
+            info_msg += "✨ 签到功能：发送「我要签到」或「为狗子打call」\n"
+            info_msg += "🔍 查询信息：发送「查看个人信息」\n"
+            info_msg += "🏆 排行榜：发送「排行信息」\n"
+            info_msg += "⚙️ 管理员功能：@用户 修为+100（设置修为）\n"
+            info_msg += "⚙️ 管理员功能：@用户 阅历+100（设置阅历）\n"
+            info_msg += "⚙️ 管理员功能：@用户 积分+100（设置积分）"
             
             yield event.plain_result(info_msg)
             
@@ -2635,7 +2694,7 @@ class MessageStatsPlugin(Star):
                         target_user.add_cultivation(amount)
                         new_value = target_user.cultivation
                         action = "增加" if amount > 0 else "减少"
-                        yield event.plain_result(f"修改{target_user.nickname}群员，修为{action}{abs(amount)}，当前修为{new_value}")
+                        yield event.plain_result(f"⚔️ 修为调整：{target_user.nickname} {action}{abs(amount)}修为，当前修为：{new_value}")
                 elif '设置修为' in operation:
                     # 设置修为
                     match = re.search(r'设置修为(\d+)', operation)
@@ -2644,7 +2703,7 @@ class MessageStatsPlugin(Star):
                         old_value = target_user.cultivation
                         target_user.cultivation = amount
                         new_value = target_user.cultivation
-                        yield event.plain_result(f"修改{target_user.nickname}群员，修为{new_value}，当前修为{new_value}")
+                        yield event.plain_result(f"⚔️ 修为设置：{target_user.nickname} 修为设置为{new_value}")
                         
             elif '阅历' in operation:
                 if '+' in operation or '-' in operation:
@@ -2656,7 +2715,7 @@ class MessageStatsPlugin(Star):
                         target_user.add_experience(amount)
                         new_value = target_user.experience
                         action = "增加" if amount > 0 else "减少"
-                        yield event.plain_result(f"修改{target_user.nickname}群员，阅历{action}{abs(amount)}，当前阅历{new_value}")
+                        yield event.plain_result(f"📚 阅历调整：{target_user.nickname} {action}{abs(amount)}阅历，当前阅历：{new_value}")
                 elif '设置阅历' in operation:
                     # 设置阅历
                     match = re.search(r'设置阅历(\d+)', operation)
@@ -2665,7 +2724,7 @@ class MessageStatsPlugin(Star):
                         old_value = target_user.experience
                         target_user.experience = amount
                         new_value = target_user.experience
-                        yield event.plain_result(f"修改{target_user.nickname}群员，阅历{new_value}，当前阅历{new_value}")
+                        yield event.plain_result(f"📚 阅历设置：{target_user.nickname} 阅历设置为{new_value}")
                         
             elif '积分' in operation:
                 if '+' in operation or '-' in operation:
@@ -2677,7 +2736,7 @@ class MessageStatsPlugin(Star):
                         target_user.add_points(amount)
                         new_value = target_user.points
                         action = "增加" if amount > 0 else "减少"
-                        yield event.plain_result(f"修改{target_user.nickname}群员，积分{action}{abs(amount)}，当前积分{new_value}")
+                        yield event.plain_result(f"💎 积分调整：{target_user.nickname} {action}{abs(amount)}积分，当前积分：{new_value}")
                 elif '设置积分' in operation:
                     # 设置积分
                     match = re.search(r'设置积分(\d+)', operation)
@@ -2686,7 +2745,7 @@ class MessageStatsPlugin(Star):
                         old_value = target_user.points
                         target_user.points = amount
                         new_value = target_user.points
-                        yield event.plain_result(f"修改{target_user.nickname}群员，积分为{new_value}，当前积分{new_value}")
+                        yield event.plain_result(f"💎 积分设置：{target_user.nickname} 积分设置为{new_value}")
             
             # 保存用户数据
             await self.data_manager.save_group_data(group_id, users)
@@ -2782,7 +2841,17 @@ class MessageStatsPlugin(Star):
                 for i, user in enumerate(sorted_users[:10]):
                     if i < len(rewards):
                         user.add_spirit_stones(rewards[i])
-                        reward_msg += f"第{i+1}名：{user.nickname} 获得灵石+{rewards[i]}\n"
+                        # 添加排名图标
+                        if i == 0:
+                            rank_icon = "🥇"
+                        elif i == 1:
+                            rank_icon = "🥈"
+                        elif i == 2:
+                            rank_icon = "🥉"
+                        else:
+                            rank_icon = f"第{i+1}名"
+                        
+                        reward_msg += f"{rank_icon}：{user.nickname} 获得灵石+{rewards[i]} 💰\n"
                         self.logger.info(f"阅历奖励：{user.nickname} 获得灵石+{rewards[i]}（第{i+1}名）")
                 
                 # 保存群组数据
@@ -2818,3 +2887,72 @@ class MessageStatsPlugin(Star):
             
         except Exception as e:
             self.logger.error(f"发送每周奖励消息失败: {e}", exc_info=True)
+    
+    async def _process_rbot_commands(self, event: AstrMessageEvent, group_id: str, user_id: str, message_str: str):
+        """处理Rbot命令（不艾特机器人的情况）
+        
+        Args:
+            event: 消息事件对象
+            group_id: 群组ID
+            user_id: 用户ID
+            message_str: 消息内容
+        """
+        try:
+            # 检查是否是Rbot命令
+            if message_str in ["我要签到", "为狗子打call"]:
+                # 处理签到命令
+                async for result in self.rbot_sign_in(event):
+                    # 使用主动消息发送API
+                    await self._send_active_message(event, result)
+                    
+            elif message_str == "查看个人信息":
+                # 处理查看个人信息命令
+                async for result in self.rbot_user_info(event):
+                    # 使用主动消息发送API
+                    await self._send_active_message(event, result)
+                    
+            elif message_str == "查看修为排名":
+                # 检查是否是群管理员
+                if event.is_admin():
+                    # 处理查看修为排名命令
+                    async for result in self.rbot_cultivation_rank(event):
+                        # 使用主动消息发送API
+                        await self._send_active_message(event, result)
+                        
+            elif message_str == "查看阅历排行":
+                # 检查是否是群管理员
+                if event.is_admin():
+                    # 处理查看阅历排行命令
+                    async for result in self.rbot_experience_rank(event):
+                        # 使用主动消息发送API
+                        await self._send_active_message(event, result)
+                        
+        except Exception as e:
+            self.logger.error(f"处理Rbot命令失败: {e}", exc_info=True)
+    
+    async def _send_active_message(self, event: AstrMessageEvent, message_generator):
+        """发送主动消息
+        
+        Args:
+            event: 消息事件对象
+            message_generator: 消息生成器
+        """
+        try:
+            # 获取unified_msg_origin
+            unified_msg_origin = event.unified_msg_origin
+            
+            # 遍历消息生成器
+            async for result in message_generator:
+                # 获取消息内容
+                if hasattr(result, 'message_chain'):
+                    # 如果是消息链对象
+                    message_content = result.message_chain
+                else:
+                    # 如果是字符串
+                    message_content = str(result)
+                
+                # 使用context.send_message发送消息
+                await self.context.send_message(unified_msg_origin, message_content)
+                
+        except Exception as e:
+            self.logger.error(f"发送主动消息失败: {e}", exc_info=True)
