@@ -3201,15 +3201,22 @@ class MessageStatsPlugin(Star):
                         break
                 await self.data_manager.save_group_data(group_id, users)
                 
-                # 直接发送消息，避免额外的处理延迟
-                await self.context.send_message(event.unified_msg_origin, f"{user_name} {message}")
+                # 使用MessageChain创建消息对象
+                from astrbot.api.event import MessageChain
+                message_chain = MessageChain().plain(f"{user_name} {message}")
+                await self.context.send_message(event.unified_msg_origin, message_chain)
             else:
-                # 直接发送消息，避免额外的处理延迟
-                await self.context.send_message(event.unified_msg_origin, f"{user_name} {message}")
+                # 使用MessageChain创建消息对象
+                from astrbot.api.event import MessageChain
+                message_chain = MessageChain().plain(f"{user_name} {message}")
+                await self.context.send_message(event.unified_msg_origin, message_chain)
                 
         except Exception as e:
             self.logger.error(f"执行签到操作失败: {e}", exc_info=True)
-            await self.context.send_message(event.unified_msg_origin, "签到失败，请稍后重试")
+            # 使用MessageChain创建消息对象
+            from astrbot.api.event import MessageChain
+            message_chain = MessageChain().plain("签到失败，请稍后重试")
+            await self.context.send_message(event.unified_msg_origin, message_chain)
     
     async def _send_active_message(self, event: AstrMessageEvent, message_generator):
         """发送主动消息
