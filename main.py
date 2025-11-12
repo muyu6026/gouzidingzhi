@@ -458,6 +458,8 @@ class MessageStatsPlugin(Star):
             self.logger.info("图片生成器初始化成功")
         except ImageGenerationError as e:
             self.logger.warning(f"图片生成器初始化失败: {e}")
+            self.logger.warning("💡 提示: 如果需要图片功能，请运行 'playwright install' 命令安装浏览器")
+            self.logger.warning("📝 注意: 即使图片功能不可用，排行榜仍会以文字模式显示")
         
         # 记录当前配置状态
         self.logger.info(f"当前配置: 图片模式={self.plugin_config.if_send_pic}, 显示人数={self.plugin_config.rand}, 自动记录={self.plugin_config.auto_record_enabled}")
@@ -756,13 +758,14 @@ class MessageStatsPlugin(Star):
                 users = await self.data_manager.get_group_data(group_id)
                 users.append(user)
                 await self.data_manager.save_group_data(group_id, users)
-            
-            # 增加修为和阅历
-            user.add_cultivation(1)  # 修为+1
-            user.add_experience(1)   # 阅历+1
-            
-            # 保存用户数据
-            await self.data_manager.save_group_data(group_id, await self.data_manager.get_group_data(group_id))
+            else:
+                # 增加修为和阅历
+                user.add_cultivation(1)  # 修为+1
+                user.add_experience(1)   # 阅历+1
+                
+                # 保存用户数据 - 直接使用当前的用户列表，避免数据不一致
+                users = await self.data_manager.get_group_data(group_id)
+                await self.data_manager.save_group_data(group_id, users)
             
             # 只在开启详细日志时记录Rbot奖励
             if self.plugin_config and getattr(self.plugin_config, 'detailed_logging_enabled', True):
@@ -1493,11 +1496,18 @@ class MessageStatsPlugin(Star):
         
         return group_id, current_user_id, filtered_data, config, title, group_info
     
-    async def _render_rank_as_image(self, event: AstrMessageEvent, filtered_data: List[tuple], 
+    async def _render_rank_as_image(self, event: AstrMessageEvent, filtered_data: List[tuple],
                                   group_info: GroupInfo, title: str, current_user_id: str, config: PluginConfig):
         """渲染排行榜为图片模式"""
         temp_path = None
         try:
+            # 检查图片生成器是否可用
+            if not self.image_generator or not hasattr(self.image_generator, 'browser') or not self.image_generator.browser:
+                self.logger.warning("图片生成器未初始化或浏览器不可用，回退到文字模式")
+                text_msg = self._generate_text_message(filtered_data, group_info, title, config)
+                yield event.plain_result(text_msg)
+                return
+            
             # 提取用户数据用于图片生成，并应用人数限制
             # 先限制数量，再提取用户数据
             limited_data = filtered_data[:config.rand]
@@ -1540,6 +1550,11 @@ class MessageStatsPlugin(Star):
             yield event.plain_result(text_msg)
         except ValueError as e:
             self.logger.error(f"图片渲染失败(数据格式错误): {e}")
+            # 回退到文字模式
+            text_msg = self._generate_text_message(filtered_data, group_info, title, config)
+            yield event.plain_result(text_msg)
+        except Exception as e:
+            self.logger.error(f"图片渲染失败(未知错误): {e}")
             # 回退到文字模式
             text_msg = self._generate_text_message(filtered_data, group_info, title, config)
             yield event.plain_result(text_msg)
@@ -2307,9 +2322,16 @@ class MessageStatsPlugin(Star):
             # 执行签到
             success, message, stones_gain, cultivation_gain = user.sign_today()
             
+            # 保存用户数据 - 确保签到状态被正确保存
+            users = await self.data_manager.get_group_data(group_id)
+            # 找到当前用户并更新
+            for i, u in enumerate(users):
+                if u.user_id == user_id:
+                    users[i] = user  # 使用更新后的用户对象
+                    break
+            await self.data_manager.save_group_data(group_id, users)
+            
             if success:
-                # 保存用户数据
-                await self.data_manager.save_group_data(group_id, await self.data_manager.get_group_data(group_id))
                 yield event.plain_result(f"{user_name} {message}")
             else:
                 yield event.plain_result(f"{user_name} {message}")
@@ -2540,6 +2562,61 @@ class MessageStatsPlugin(Star):
         except Exception as e:
             self.logger.error(f"查看个人信息失败: {e}", exc_info=True)
             yield event.plain_result("查看个人信息失败，请稍后重试")
+    
+    @filter.command("帮助")
+    async def rbot_help(self, event: AstrMessageEvent):
+        """Rbot功能帮助"""
+        try:
+            # 获取群组ID
+            group_id = event.get_group_id()
+            if not group_id:
+                yield event.plain_result("无法获取群组信息,请在群聊中使用此命令！")
+                return
+            
+            group_id = str(group_id)
+            
+            # 检查群组是否启用了Rbot功能
+            if not self._is_rbot_enabled_for_group(group_id):
+                yield event.plain_result("本群未启用Rbot功能！")
+                return
+            
+            # 生成帮助消息
+            help_msg = "🤖 Rbot功能帮助 🤖\n"
+            help_msg += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            
+            help_msg += "【群签到功能】\n"
+            help_msg += "触发方式：任何群员发送「我要签到」或「为狗子打call」\n"
+            help_msg += "功能效果：签到后灵石+5~10，修为+10\n"
+            help_msg += "成功回复：本次签到成功，灵石+X，修为+X\n"
+            help_msg += "失败回复：签到失败，请第二天再签到\n\n"
+            
+            help_msg += "【群回复记录】\n"
+            help_msg += "触发方式：任何群员发一条信息\n"
+            help_msg += "功能效果：修为+1，阅历+1（每周清理一次）\n"
+            help_msg += "注意：Rbot不进行任何回复\n\n"
+            
+            help_msg += "【排行信息】\n"
+            help_msg += "触发方式：群管理发送「查看修为排名」或「查看阅历排行」\n"
+            help_msg += "功能效果：显示排行榜，每周阅历排行榜给予1~10名不同的灵石\n\n"
+            
+            help_msg += "【查询个人信息】\n"
+            help_msg += "触发方式：任何群员发送「查看个人信息」\n"
+            help_msg += "功能效果：显示个人修为、阅历、积分、灵石等信息\n\n"
+            
+            help_msg += "【修改修为阅历积分】\n"
+            help_msg += "触发方式：@某个群员 修为XXX（如：@狗子 修为-1000）\n"
+            help_msg += "设置方式：@某个群员 设置修为XXX（如：@狗子 设置修为1000）\n"
+            help_msg += "权限要求：只能指定人员操作\n"
+            help_msg += "回复示例：修改XX群员，修为XXX，当前修为XXX\n\n"
+            
+            help_msg += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            help_msg += "💡 提示：所有功能都支持艾特机器人触发和关键词触发两种方式"
+            
+            yield event.plain_result(help_msg)
+            
+        except Exception as e:
+            self.logger.error(f"显示Rbot帮助失败: {e}", exc_info=True)
+            yield event.plain_result("显示帮助失败，请稍后重试")
     
     @filter.event_message_type(EventMessageType.ALL)
     async def rbot_admin_command_listener(self, event: AstrMessageEvent):
@@ -2927,6 +3004,12 @@ class MessageStatsPlugin(Star):
                         # 使用主动消息发送API
                         await self._send_active_message(event, result)
                         
+            elif message_str == "帮助":
+                # 处理帮助命令
+                async for result in self.rbot_help(event):
+                    # 使用主动消息发送API
+                    await self._send_active_message(event, result)
+                        
         except Exception as e:
             self.logger.error(f"处理Rbot命令失败: {e}", exc_info=True)
     
@@ -2974,7 +3057,15 @@ class MessageStatsPlugin(Star):
                     message_content = str(message_generator)
                 
                 # 使用context.send_message发送消息
-                await self.context.send_message(unified_msg_origin, message_content)
+                # 确保message_content是正确的消息链格式
+                if isinstance(message_content, str):
+                    # 如果是字符串，需要创建MessageChain对象
+                    from astrbot.api.event import MessageChain
+                    message_chain = MessageChain().message(message_content)
+                    await self.context.send_message(unified_msg_origin, message_chain)
+                else:
+                    # 如果是消息链对象，直接发送
+                    await self.context.send_message(unified_msg_origin, message_content)
                 
         except Exception as e:
             self.logger.error(f"发送主动消息失败: {e}", exc_info=True)
