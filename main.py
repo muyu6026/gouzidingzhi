@@ -3290,19 +3290,31 @@ class MessageStatsPlugin(Star):
                 # 尝试转换为字符串
                 message_content = MessageChain().message(str(result))
             
-            # 使用context.send_message发送消息
             # 确保message_content是MessageChain对象
+            # 如果不是MessageChain对象，尝试转换
+            if not hasattr(message_content, 'chain'):
+                if isinstance(message_content, str):
+                    message_content = MessageChain().message(message_content)
+                else:
+                    message_content = MessageChain().message(str(message_content))
+            
+            # 使用context.send_message发送消息
             await self.context.send_message(unified_msg_origin, message_content)
                 
         except AttributeError as e:
-            # 特殊处理AttributeError，特别是'str' object has no attribute 'chain'
-            if "'str' object has no attribute 'chain'" in str(e):
-                self.logger.error(f"处理消息结果失败(字符串对象错误): {e}", exc_info=True)
+            # 特殊处理AttributeError，特别是'list' object has no attribute 'chain'或'str' object has no attribute 'chain'
+            if "'list' object has no attribute 'chain'" in str(e) or "'str' object has no attribute 'chain'" in str(e):
+                self.logger.error(f"处理消息结果失败(对象类型错误): {e}", exc_info=True)
                 # 尝试将result转换为MessageChain并发送
                 try:
                     from astrbot.api.event import MessageChain
                     if isinstance(result, str):
                         message_chain = MessageChain().message(result)
+                        await self.context.send_message(unified_msg_origin, message_chain)
+                    elif isinstance(result, list):
+                        # 如果是列表，先转换为字符串
+                        message_str = ''.join(str(item) for item in result)
+                        message_chain = MessageChain().message(message_str)
                         await self.context.send_message(unified_msg_origin, message_chain)
                     else:
                         message_chain = MessageChain().message(str(result))
