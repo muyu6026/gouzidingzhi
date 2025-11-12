@@ -17,7 +17,8 @@ from typing import List, Optional, Dict, Any
 from enum import Enum
 from pathlib import Path
 import aiofiles
-from croniter import croniter
+# 使用内置的datetime和re模块替代croniter
+# 这样可以减少外部依赖，提高兼容性
 from astrbot.api import logger as astrbot_logger
 from astrbot.api.event import AstrMessageEvent, MessageChain, filter
 # PlatformAdapterType 在 astrbot.api.event.filter 中
@@ -687,14 +688,10 @@ class TimerManager:
         Returns:
             bool: 格式是否有效
         """
-        # 首先尝试 cron 格式
-        try:
-            croniter(time_str)
-            return True
-        except (ValueError, TypeError):
-            # cron 格式失败后尝试简单格式
-            pattern = r'^([01]?[0-9]|2[0-3]):[0-5][0-9]$'
-            return bool(re.match(pattern, time_str))
+        # 目前只支持简单格式 "HH:MM"
+        # 如果需要支持更复杂的cron表达式，可以添加相应的解析逻辑
+        pattern = r'^([01]?[0-9]|2[0-3]):[0-5][0-9]$'
+        return bool(re.match(pattern, time_str))
     
     def _calculate_next_push_time(self, push_time: str) -> datetime:
         """计算下次推送时间
@@ -711,24 +708,19 @@ class TimerManager:
             # 获取当前时间
             now = datetime.now()
             
-            # 首先尝试使用 cron 格式
-            try:
-                cron = croniter(push_time, now)
-                next_time = cron.get_next(datetime)
-                return next_time
-            except (ValueError, TypeError):
-                # 如果 cron 格式失败，则使用简单格式 "HH:MM"
-                if not ':' in push_time:
-                    raise ValueError("不支持的时间格式")
-                
-                hour, minute = map(int, push_time.split(':'))
-                target_time = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
-                
-                # 如果今天的时间已过，则推到明天
-                if target_time <= now:
-                    target_time += timedelta(days=1)
-                
-                return target_time
+            # 目前只支持简单格式 "HH:MM"
+            # 如果需要支持更复杂的cron表达式，可以添加相应的解析逻辑
+            if not ':' in push_time:
+                raise ValueError("不支持的时间格式")
+            
+            hour, minute = map(int, push_time.split(':'))
+            target_time = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+            
+            # 如果今天的时间已过，则推到明天
+            if target_time <= now:
+                target_time += timedelta(days=1)
+            
+            return target_time
             
         except (ValueError, TypeError, OSError, IOError) as e:
             # 捕获计算推送时间时的数值、类型和系统错误
