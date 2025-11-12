@@ -2941,15 +2941,29 @@ class MessageStatsPlugin(Star):
             # 获取unified_msg_origin
             unified_msg_origin = event.unified_msg_origin
             
-            # 遍历消息生成器
-            async for result in message_generator:
+            # 检查message_generator是否是异步生成器
+            if hasattr(message_generator, '__aiter__'):
+                # 如果是异步生成器，遍历它
+                async for result in message_generator:
+                    # 获取消息内容
+                    if hasattr(result, 'message_chain'):
+                        # 如果是消息链对象
+                        message_content = result.message_chain
+                    else:
+                        # 如果是字符串
+                        message_content = str(result)
+                    
+                    # 使用context.send_message发送消息
+                    await self.context.send_message(unified_msg_origin, message_content)
+            else:
+                # 如果不是异步生成器，直接处理
                 # 获取消息内容
-                if hasattr(result, 'message_chain'):
+                if hasattr(message_generator, 'message_chain'):
                     # 如果是消息链对象
-                    message_content = result.message_chain
+                    message_content = message_generator.message_chain
                 else:
                     # 如果是字符串
-                    message_content = str(result)
+                    message_content = str(message_generator)
                 
                 # 使用context.send_message发送消息
                 await self.context.send_message(unified_msg_origin, message_content)
