@@ -55,18 +55,18 @@ class JsonHandler:
     def 验证文件名(文件名: str) -> bool:
         """验证文件名是否合法"""
         if not 文件名:
-            print("错误: 文件名不能为空")
+            astrbot_logger.error("错误: 文件名不能为空")
             return False
         
         # 检查文件名是否包含路径分隔符（防止路径遍历攻击）
         if any(c in 文件名 for c in ['/', '\\', './', '../', '.\\', '..\\']):
-            print(f"错误: 文件名 '{文件名}' 包含非法字符或路径组件")
+            astrbot_logger.error(f"错误: 文件名 '{文件名}' 包含非法字符或路径组件")
             return False
         
         # 检查文件名是否包含非法字符
         invalid_chars = '<>|?*"'
         if any(c in 文件名 for c in invalid_chars):
-            print(f"错误: 文件名 '{文件名}' 包含非法字符")
+            astrbot_logger.error(f"错误: 文件名 '{文件名}' 包含非法字符")
             return False
         
         return True
@@ -82,10 +82,10 @@ class JsonHandler:
                     with open(文件路径, 'r', encoding='utf-8') as f:
                         return json.load(f) if f.read().strip() else {}
                 except Exception as e:
-                    print(f"读取JSON文件失败: {e}")
+                    astrbot_logger.error(f"读取JSON文件失败: {e}")
             return {}
         except Exception as e:
-            print(f"读取数据错误: {e}")
+            astrbot_logger.error(f"读取数据错误: {e}")
             return {}
     
     @staticmethod
@@ -116,7 +116,7 @@ class JsonHandler:
             
             return file_path
         except Exception as e:
-            print(f"获取文件路径失败: {e}")
+            astrbot_logger.error(f"获取文件路径失败: {e}")
             # 降级方案：使用当前目录
             current_dir = os.path.dirname(os.path.abspath(__file__))
             file_path = os.path.join(current_dir, 文件名)
@@ -143,16 +143,16 @@ class JsonHandler:
             目录 = os.path.dirname(文件路径)
             if not os.path.exists(目录):
                 os.makedirs(目录, exist_ok=True)
-                print(f"创建目录: {目录}")
+                astrbot_logger.info(f"创建目录: {目录}")
             
             # 写入数据
             with open(文件路径, 'w', encoding='utf-8') as f:
                 json.dump(数据, f, ensure_ascii=False, indent=2)
             
-            print(f"数据已成功写入: {文件路径}")
+            astrbot_logger.info(f"数据已成功写入: {文件路径}")
             return True
         except Exception as e:
-            print(f"写入JSON文件失败: {文件名}, 错误: {e}")
+            astrbot_logger.error(f"写入JSON文件失败: {文件名}, 错误: {e}")
             return False
     
     @staticmethod
@@ -164,7 +164,7 @@ class JsonHandler:
             
             # 检查文件是否存在
             if not os.path.exists(文件路径):
-                print(f"文件不存在，创建空字典: {文件路径}")
+                astrbot_logger.info(f"文件不存在，创建空字典: {文件路径}")
                 # 创建空文件
                 JsonHandler.写入Json字典(文件名, {})
                 return {}
@@ -177,12 +177,12 @@ class JsonHandler:
                 字典 = json.loads(json内容)
                 
                 if not isinstance(字典, dict):
-                    print(f"JSON文件内容格式不正确: {文件路径}")
+                    astrbot_logger.error(f"JSON文件内容格式不正确: {文件路径}")
                     return {}
                 
                 return 字典
         except Exception as ex:
-            print(f"错误: 读取JSON字典时发生错误 - {ex}")
+            astrbot_logger.error(f"错误: 读取JSON字典时发生错误 - {ex}")
             return {}
     
     @staticmethod
@@ -197,7 +197,7 @@ class JsonHandler:
         """向JSON文件添加或更新键值对"""
         try:
             if not 键:
-                print("错误: 键名不能为空")
+                astrbot_logger.error("错误: 键名不能为空")
                 return False
             
             # 读取现有数据
@@ -209,7 +209,7 @@ class JsonHandler:
             # 写入文件
             return JsonHandler.写入Json字典(文件名, data)
         except Exception as ex:
-            print(f"错误: 添加或更新值时发生错误 - {ex}")
+            astrbot_logger.error(f"错误: 添加或更新值时发生错误 - {ex}")
             return False
     
 # 创建别名方便使用
@@ -2880,7 +2880,11 @@ class MessageStatsPlugin(Star):
             if key not in sign_in_data or sign_in_data[key] is None:
                 # 如果为空则存一个用户的false
                 sign_in_data[key] = False
-                JsonHandler.写入Json字典("sign_in_status.json", sign_in_data)
+                try:
+                    JsonHandler.写入Json字典("sign_in_status.json", sign_in_data)
+                except Exception as e:
+                    self.logger.error(f"保存签到状态失败: {e}", exc_info=True)
+                    raise
                 return False
             
             # 返回签到状态，确保是布尔值
@@ -2913,7 +2917,11 @@ class MessageStatsPlugin(Star):
             sign_in_data[key] = status
             
             # 保存到文件
-            JsonHandler.写入Json字典("sign_in_status.json", sign_in_data)
+            try:
+                JsonHandler.写入Json字典("sign_in_status.json", sign_in_data)
+            except Exception as e:
+                self.logger.error(f"保存签到状态失败: {e}", exc_info=True)
+                raise
             
             self.logger.info(f"设置签到状态: {group_id}_{user_id} -> {status}")
             
@@ -2956,7 +2964,11 @@ class MessageStatsPlugin(Star):
                         new_sign_in_data[key] = value
             
             # 保存清理后的签到状态
-            JsonHandler.写入Json字典("sign_in_status.json", new_sign_in_data)
+            try:
+                JsonHandler.写入Json字典("sign_in_status.json", new_sign_in_data)
+            except Exception as e:
+                self.logger.error(f"保存签到状态失败: {e}", exc_info=True)
+                raise
             
             # 更新最后重置日期
             setattr(config, reset_key, today)
