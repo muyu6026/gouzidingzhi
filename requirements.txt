@@ -20,5 +20,5 @@ python-dateutil>=2.9.0
 # 缓存支持
 cachetools>=5.3.3
 
-# Cron 表达式支持
-croniter>=1.0.0
+# Cron 表达式支持 - 已移除，使用内置datetime模块替代
+# croniter>=1.0.0
