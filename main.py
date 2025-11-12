@@ -2876,8 +2876,15 @@ class MessageStatsPlugin(Star):
             # 构建键名：群组ID_用户ID_日期
             key = f"{group_id}_{user_id}_{today}"
             
-            # 返回签到状态，默认为False
-            return bool(JsonHandler.获取值(sign_in_data, key, False))
+            # 检查键是否存在或值为空
+            if key not in sign_in_data or sign_in_data[key] is None:
+                # 如果为空则存一个用户的false
+                sign_in_data[key] = False
+                JsonHandler.写入Json字典("sign_in_status.json", sign_in_data)
+                return False
+            
+            # 返回签到状态，确保是布尔值
+            return bool(sign_in_data[key])
             
         except Exception as e:
             self.logger.error(f"获取签到状态失败: {e}", exc_info=True)
@@ -3116,10 +3123,8 @@ class MessageStatsPlugin(Star):
                     # 使用主动消息发送API发送已签到消息
                     await self._send_active_message(event, f"{user_name} 今天已经签到过了，请明天再来！")
                 else:
-                    # 处理签到命令
-                    async for result in self.rbot_sign_in(event):
-                        # 使用主动消息发送API
-                        await self._send_active_message(event, result)
+                    # 直接执行签到逻辑，避免重复调用导致延迟
+                    await self._execute_sign_in(event, group_id, user_id)
                     
             elif message_str == "查看个人信息":
                 # 处理查看个人信息命令
@@ -3151,6 +3156,60 @@ class MessageStatsPlugin(Star):
                         
         except Exception as e:
             self.logger.error(f"处理Rbot命令失败: {e}", exc_info=True)
+    
+    async def _execute_sign_in(self, event: AstrMessageEvent, group_id: str, user_id: str):
+        """执行签到操作（优化版本，提高响应速度）
+        
+        Args:
+            event: 消息事件对象
+            group_id: 群组ID
+            user_id: 用户ID
+        """
+        try:
+            # 获取用户显示名称
+            user_name = await self._get_user_display_name(event, group_id, user_id)
+            
+            # 获取用户数据
+            user = await self.data_manager.get_user_in_group(group_id, user_id)
+            
+            if not user:
+                # 如果用户不存在，创建新用户
+                from .utils.models import UserData
+                user = UserData(
+                    user_id=user_id,
+                    nickname=user_name,
+                    message_count=0
+                )
+                # 保存新用户
+                users = await self.data_manager.get_group_data(group_id)
+                users.append(user)
+                await self.data_manager.save_group_data(group_id, users)
+            
+            # 执行签到
+            success, message, stones_gain, cultivation_gain = user.sign_today()
+            
+            if success:
+                # 标记用户今天已签到
+                await self._set_sign_in_status(group_id, user_id, True)
+                
+                # 保存用户数据
+                users = await self.data_manager.get_group_data(group_id)
+                # 找到当前用户并更新
+                for i, u in enumerate(users):
+                    if u.user_id == user_id:
+                        users[i] = user  # 使用更新后的用户对象
+                        break
+                await self.data_manager.save_group_data(group_id, users)
+                
+                # 直接发送消息，避免额外的处理延迟
+                await self.context.send_message(event.unified_msg_origin, f"{user_name} {message}")
+            else:
+                # 直接发送消息，避免额外的处理延迟
+                await self.context.send_message(event.unified_msg_origin, f"{user_name} {message}")
+                
+        except Exception as e:
+            self.logger.error(f"执行签到操作失败: {e}", exc_info=True)
+            await self.context.send_message(event.unified_msg_origin, "签到失败，请稍后重试")
     
     async def _send_active_message(self, event: AstrMessageEvent, message_generator):
         """发送主动消息
