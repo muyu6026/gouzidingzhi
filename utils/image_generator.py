@@ -273,6 +273,7 @@ class ImageGenerator:
             self.logger.info("图片生成器初始化完成")
         except FileNotFoundError as e:
             self.logger.error(f"浏览器可执行文件未找到: {e}")
+            self.logger.error("💡 提示: 请运行 'playwright install' 命令安装浏览器")
             raise ImageGenerationError(f"浏览器未安装或路径错误: {e}")
         except PermissionError as e:
             self.logger.error(f"启动浏览器权限不足: {e}")
@@ -284,6 +285,10 @@ class ImageGenerator:
             # 捕获操作系统相关错误，如系统资源不足、进程启动失败等
             self.logger.error(f"初始化图片生成器失败: {e}")
             self.logger.error(f"详细错误: {traceback.format_exc()}")
+            # 检查是否是Playwright浏览器未安装的错误
+            if "Executable doesn't exist" in str(e) or "playwright install" in str(e):
+                self.logger.error("💡 提示: 请运行 'playwright install' 命令安装浏览器")
+                self.logger.error("📝 安装完成后重启机器人即可使用图片生成功能")
             raise ImageGenerationError(f"初始化失败: {e}")
     
     async def cleanup(self):
