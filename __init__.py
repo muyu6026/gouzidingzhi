@@ -6,7 +6,7 @@ AstrBot 狗子定制
 - 名称: astrbot_plugin_message_gouzidingzhi
 - 显示名称: 狗子定制
 - 描述: 统计群成员发言次数，生成排行榜，支持群成员发言统计和排行榜生成
-- 版本: 1.0
+- 版本: 1.6.0
 - 作者: 暮雨
 
 功能特性:
@@ -16,6 +16,8 @@ AstrBot 狗子定制
 - 完整的配置管理系统
 - 权限控制和安全管理
 - 手动查询排行榜功能
+- 定时推送功能（支持Cron表达式）
+- Rbot游戏功能（签到、修为、阅历、积分）
 
 使用方法:
 1. 将插件文件放置到 AstrBot 插件目录
@@ -32,11 +34,27 @@ AstrBot 狗子定制
 - #清除发言榜单 - 清除当前群数据
 - #设置发言榜数量 数量 - 设置显示人数
 - #设置发言榜图片 模式 - 设置图片模式
+- #发言榜定时状态 - 查看定时任务状态
+- #手动推送发言榜 - 手动推送排行榜
+- #设置发言榜定时时间 时间 - 设置定时推送时间
+- #设置发言榜定时群组 群组ID - 设置定时推送群组
+- #删除发言榜定时群组 群组ID - 删除定时推送群组
+- #启用发言榜定时 - 启用定时推送
+- #禁用发言榜定时 - 禁用定时推送
+- #设置发言榜定时类型 类型 - 设置定时推送排行榜类型
+- #我要签到 / #为狗子打call - Rbot签到功能
+- #排行信息 - 查看Rbot排行信息
+- #查看修为排名 - 查看修为排名（管理员）
+- #查看阅历排行 - 查看阅历排行（管理员）
+- #查看个人信息 - 查看个人信息
+- #帮助 - 查看帮助信息
 
 配置说明:
 - 可配置显示人数（5-50人）
 - 支持图片/文字两种模式
 - 完整的权限控制
+- 支持定时推送（Cron表达式）
+- 支持Rbot游戏功能
 
 依赖要求:
 - astrbot >= 4.5.0
@@ -46,12 +64,14 @@ AstrBot 狗子定制
 - python-dateutil >= 2.8.0
 - orjson >= 3.9.0
 - cachetools >= 5.0.0
+- croniter >= 1.0.0
 
 注意事项:
 - 需要群主或管理员权限进行设置
 - 图片生成需要安装 Playwright 浏览器
 - 建议定期清理旧数据以节省存储空间
 - 插件会自动创建必要的数据目录
+- 定时推送需要先在群组中发送消息以收集unified_msg_origin
 
 技术支持:
 - 如有问题请查看日志文件
@@ -59,9 +79,9 @@ AstrBot 狗子定制
 - 提供完整的错误处理机制
 """
 
-__version__ = "1.0"
+__version__ = "1.6.0"
 __author__ = "muyu6026"
-__description__ = "群发言统计插件（标准版），支持排行榜和手动查询功能"
+__description__ = "群发言统计插件（增强版），支持排行榜、定时推送和Rbot游戏功能"
 
 # 配置常量
 ADMIN_RESTRICTION_DISABLED = 0
@@ -73,8 +93,8 @@ from .main import MessageStatsPlugin
 
 # 插件元数据
 PLUGIN_INFO = {
-    "name": "astrbot_plugin_message_stats",
-    "display_name": "群发言统计（标准版）",
+    "name": "astrbot_plugin_message_gouzidingzhi",
+    "display_name": "群发言统计（增强版）",
     "description": __description__,
     "version": __version__,
     "author": __author__,
@@ -87,7 +107,16 @@ DEFAULT_CONFIG = {
     "is_admin_restricted": ADMIN_RESTRICTION_DISABLED,
     "rand": DEFAULT_RANK_SIZE,
     "if_send_pic": PICTURE_MODE_ENABLED,
-    "auto_record_enabled": True
+    "auto_record_enabled": True,
+    "detailed_logging_enabled": True,
+    "timer_enabled": False,
+    "timer_push_time": "09:00",
+    "timer_target_groups": [],
+    "timer_rank_type": "daily",
+    "rbot_enabled": True,
+    "rbot_enabled_groups": [],
+    "rbot_admin_users": [],
+    "rbot_weekly_reset_day": 0
 }
 
 # 支持的命令列表
@@ -98,18 +127,23 @@ SUPPORTED_COMMANDS = [
     "启用定时", "禁用定时", "设置定时类型",
     "配置同步状态", "同步配置",
     "设置显示人数", "设置图片模式",
-    "清除数据"
+    "清除数据",
+    "我要签到", "为狗子打call",
+    "排行信息", "查看修为排名", "查看阅历排行",
+    "查看个人信息", "帮助"
 ]
 
 # 权限要求
 PERMISSION_REQUIREMENTS = {
     "admin_only": [
         "设置显示人数", "设置图片模式", "清除数据", "同步配置",
-        "设置定时时间", "设置定时群组", "删除定时群组", "启用定时", "禁用定时", "设置定时类型"
+        "设置定时时间", "设置定时群组", "删除定时群组", "启用定时", "禁用定时", "设置定时类型",
+        "查看修为排名", "查看阅历排行"
     ],
     "public": [
         "排行榜", "日榜", "周榜", "月榜",
-        "定时状态", "手动推送", "配置同步状态"
+        "定时状态", "手动推送", "配置同步状态",
+        "我要签到", "为狗子打call", "排行信息", "查看个人信息", "帮助"
     ]
 }
 
