@@ -82,7 +82,7 @@ class JsonHandler:
                     with open(文件路径, 'r', encoding='utf-8') as f:
                         return json.load(f) if f.read().strip() else {}
                 except Exception as e:
-                    logger.error(f"读取JSON文件失败: {e}")
+                    print(f"读取JSON文件失败: {e}")
             return {}
         except Exception as e:
             print(f"读取数据错误: {e}")
@@ -116,7 +116,7 @@ class JsonHandler:
             
             return file_path
         except Exception as e:
-            logger.error(f"获取文件路径失败: {e}")
+            print(f"获取文件路径失败: {e}")
             # 降级方案：使用当前目录
             current_dir = os.path.dirname(os.path.abspath(__file__))
             file_path = os.path.join(current_dir, 文件名)
@@ -143,16 +143,16 @@ class JsonHandler:
             目录 = os.path.dirname(文件路径)
             if not os.path.exists(目录):
                 os.makedirs(目录, exist_ok=True)
-                logger.info(f"创建目录: {目录}")
+                print(f"创建目录: {目录}")
             
             # 写入数据
             with open(文件路径, 'w', encoding='utf-8') as f:
                 json.dump(数据, f, ensure_ascii=False, indent=2)
             
-            logger.info(f"数据已成功写入: {文件路径}")
+            print(f"数据已成功写入: {文件路径}")
             return True
         except Exception as e:
-            logger.error(f"写入JSON文件失败: {文件名}, 错误: {e}")
+            print(f"写入JSON文件失败: {文件名}, 错误: {e}")
             return False
     
     @staticmethod
@@ -164,7 +164,7 @@ class JsonHandler:
             
             # 检查文件是否存在
             if not os.path.exists(文件路径):
-                logger.info(f"文件不存在，创建空字典: {文件路径}")
+                print(f"文件不存在，创建空字典: {文件路径}")
                 # 创建空文件
                 JsonHandler.写入Json字典(文件名, {})
                 return {}
@@ -177,12 +177,12 @@ class JsonHandler:
                 字典 = json.loads(json内容)
                 
                 if not isinstance(字典, dict):
-                    logger.warning(f"JSON文件内容格式不正确: {文件路径}")
+                    print(f"JSON文件内容格式不正确: {文件路径}")
                     return {}
                 
                 return 字典
         except Exception as ex:
-            logger.error(f"错误: 读取JSON字典时发生错误 - {ex}")
+            print(f"错误: 读取JSON字典时发生错误 - {ex}")
             return {}
     
     @staticmethod
@@ -3214,6 +3214,15 @@ class MessageStatsPlugin(Star):
             if isinstance(message_content, str):
                 # 如果是字符串，直接发送字符串
                 await self.context.send_message(unified_msg_origin, message_content)
+            elif isinstance(message_content, list):
+                # 如果是列表，尝试转换为字符串
+                try:
+                    message_str = ''.join(str(item) for item in message_content)
+                    await self.context.send_message(unified_msg_origin, message_str)
+                except Exception:
+                    # 如果转换失败，尝试发送第一个元素
+                    if message_content:
+                        await self.context.send_message(unified_msg_origin, str(message_content[0]))
             else:
                 # 如果是消息链对象，直接发送
                 await self.context.send_message(unified_msg_origin, message_content)
