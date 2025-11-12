@@ -513,7 +513,7 @@ class MessageStatsPlugin(Star):
     async def _initialize_rbot_timers(self):
         """初始化Rbot功能的定时任务
         
-        创建并启动每周重置阅历的定时任务。
+        创建并启动每周重置阅历和每日重置签到状态的定时任务。
         
         Returns:
             None: 无返回值
@@ -535,9 +535,23 @@ class MessageStatsPlugin(Star):
                         # 出错后等待1小时再重试
                         await asyncio.sleep(3600)
             
+            async def daily_sign_in_reset_task():
+                """每日重置签到状态的循环任务"""
+                while True:
+                    try:
+                        # 每小时检查一次是否需要重置签到状态
+                        await self._daily_sign_in_reset()
+                        # 等待1小时
+                        await asyncio.sleep(3600)
+                    except Exception as e:
+                        self.logger.error(f"每日签到状态重置任务出错: {e}")
+                        # 出错后等待1小时再重试
+                        await asyncio.sleep(3600)
+            
             # 启动定时任务（不阻塞初始化过程）
             asyncio.create_task(weekly_reset_task())
-            self.logger.info("Rbot定时任务已启动")
+            asyncio.create_task(daily_sign_in_reset_task())
+            self.logger.info("Rbot定时任务已启动（每周阅历重置 + 每日签到状态重置）")
             
         except Exception as e:
             self.logger.error(f"初始化Rbot定时任务失败: {e}")
@@ -2303,6 +2317,13 @@ class MessageStatsPlugin(Star):
             # 获取用户显示名称
             user_name = await self._get_user_display_name(event, group_id, user_id)
             
+            # 检查用户今天是否已经签到过
+            has_signed_today = await self._get_sign_in_status(group_id, user_id)
+            
+            if has_signed_today:
+                yield event.plain_result(f"{user_name} 今天已经签到过了，请明天再来！")
+                return
+            
             # 获取用户数据
             user = await self.data_manager.get_user_in_group(group_id, user_id)
             
@@ -2322,16 +2343,19 @@ class MessageStatsPlugin(Star):
             # 执行签到
             success, message, stones_gain, cultivation_gain = user.sign_today()
             
-            # 保存用户数据 - 确保签到状态被正确保存
-            users = await self.data_manager.get_group_data(group_id)
-            # 找到当前用户并更新
-            for i, u in enumerate(users):
-                if u.user_id == user_id:
-                    users[i] = user  # 使用更新后的用户对象
-                    break
-            await self.data_manager.save_group_data(group_id, users)
-            
             if success:
+                # 标记用户今天已签到
+                await self._set_sign_in_status(group_id, user_id, True)
+                
+                # 保存用户数据
+                users = await self.data_manager.get_group_data(group_id)
+                # 找到当前用户并更新
+                for i, u in enumerate(users):
+                    if u.user_id == user_id:
+                        users[i] = user  # 使用更新后的用户对象
+                        break
+                await self.data_manager.save_group_data(group_id, users)
+                
                 yield event.plain_result(f"{user_name} {message}")
             else:
                 yield event.plain_result(f"{user_name} {message}")
@@ -2831,6 +2855,111 @@ class MessageStatsPlugin(Star):
             self.logger.error(f"执行管理员操作失败: {e}", exc_info=True)
             yield event.plain_result("执行操作失败，请稍后重试")
     
+    async def _get_sign_in_status(self, group_id: str, user_id: str) -> bool:
+        """获取用户今天的签到状态
+        
+        Args:
+            group_id (str): 群组ID
+            user_id (str): 用户ID
+            
+        Returns:
+            bool: 今天是否已签到
+        """
+        try:
+            # 获取今天的日期字符串
+            from datetime import datetime
+            today = datetime.now().strftime("%Y-%m-%d")
+            
+            # 获取签到状态文件
+            sign_in_data = JsonHandler.读取Json字典("sign_in_status.json")
+            
+            # 构建键名：群组ID_用户ID_日期
+            key = f"{group_id}_{user_id}_{today}"
+            
+            # 返回签到状态，默认为False
+            return bool(JsonHandler.获取值(sign_in_data, key, False))
+            
+        except Exception as e:
+            self.logger.error(f"获取签到状态失败: {e}", exc_info=True)
+            return False
+    
+    async def _set_sign_in_status(self, group_id: str, user_id: str, status: bool):
+        """设置用户今天的签到状态
+        
+        Args:
+            group_id (str): 群组ID
+            user_id (str): 用户ID
+            status (bool): 签到状态
+        """
+        try:
+            # 获取今天的日期字符串
+            from datetime import datetime
+            today = datetime.now().strftime("%Y-%m-%d")
+            
+            # 获取签到状态文件
+            sign_in_data = JsonHandler.读取Json字典("sign_in_status.json")
+            
+            # 构建键名：群组ID_用户ID_日期
+            key = f"{group_id}_{user_id}_{today}"
+            
+            # 设置签到状态
+            sign_in_data[key] = status
+            
+            # 保存到文件
+            JsonHandler.写入Json字典("sign_in_status.json", sign_in_data)
+            
+            self.logger.info(f"设置签到状态: {group_id}_{user_id} -> {status}")
+            
+        except Exception as e:
+            self.logger.error(f"设置签到状态失败: {e}", exc_info=True)
+    
+    async def _daily_sign_in_reset(self):
+        """每日重置签到状态的定时任务"""
+        try:
+            from datetime import datetime
+            
+            # 获取今天的日期字符串
+            today = datetime.now().strftime("%Y-%m-%d")
+            
+            # 检查是否已经执行过重置（避免一天内多次执行）
+            reset_key = "last_sign_in_reset"
+            
+            # 从配置中获取上次重置日期
+            config = await self.data_manager.get_config()
+            last_reset_date = getattr(config, reset_key, None)
+            
+            if last_reset_date == today:
+                return  # 今天已经重置过了
+            
+            # 清理过期的签到状态（保留最近7天的记录）
+            sign_in_data = JsonHandler.读取Json字典("sign_in_status.json")
+            
+            # 计算保留的日期范围
+            from datetime import timedelta
+            keep_date = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
+            
+            # 创建新的签到状态字典，只保留最近7天的记录
+            new_sign_in_data = {}
+            for key, value in sign_in_data.items():
+                # 键格式：群组ID_用户ID_日期
+                parts = key.split('_')
+                if len(parts) >= 3:
+                    date_part = parts[-1]
+                    if date_part >= keep_date:
+                        new_sign_in_data[key] = value
+            
+            # 保存清理后的签到状态
+            JsonHandler.写入Json字典("sign_in_status.json", new_sign_in_data)
+            
+            # 更新最后重置日期
+            setattr(config, reset_key, today)
+            await self.data_manager.save_config(config)
+            
+            self.logger.info(f"每日签到状态重置完成，清理了过期数据")
+            
+        except Exception as e:
+            self.logger.error(f"每日签到状态重置失败: {e}", exc_info=True)
+    
     async def _weekly_experience_reset(self):
         """每周重置阅历的定时任务"""
         try:
@@ -2978,9 +3107,19 @@ class MessageStatsPlugin(Star):
             # 检查是否是Rbot命令
             if message_str in ["我要签到", "为狗子打call"]:
                 # 处理签到命令
-                async for result in self.rbot_sign_in(event):
-                    # 使用主动消息发送API
-                    await self._send_active_message(event, result)
+                # 检查用户今天是否已经签到过
+                has_signed_today = await self._get_sign_in_status(group_id, user_id)
+                
+                if has_signed_today:
+                    # 获取用户显示名称
+                    user_name = await self._get_user_display_name(event, group_id, user_id)
+                    # 使用主动消息发送API发送已签到消息
+                    await self._send_active_message(event, f"{user_name} 今天已经签到过了，请明天再来！")
+                else:
+                    # 处理签到命令
+                    async for result in self.rbot_sign_in(event):
+                        # 使用主动消息发送API
+                        await self._send_active_message(event, result)
                     
             elif message_str == "查看个人信息":
                 # 处理查看个人信息命令
@@ -3028,44 +3167,50 @@ class MessageStatsPlugin(Star):
             if hasattr(message_generator, '__aiter__'):
                 # 如果是异步生成器，遍历它
                 async for result in message_generator:
-                    # 获取消息内容
-                    if hasattr(result, 'message_chain'):
-                        # 如果是消息链对象
-                        message_content = result.message_chain
-                    else:
-                        # 如果是字符串
-                        message_content = str(result)
-                    
-                    # 使用context.send_message发送消息
-                    # 确保message_content是正确的消息链格式
-                    if isinstance(message_content, str):
-                        # 如果是字符串，需要创建MessageChain对象
-                        from astrbot.api.event import MessageChain
-                        message_chain = MessageChain().message(message_content)
-                        await self.context.send_message(unified_msg_origin, message_chain)
-                    else:
-                        # 如果是消息链对象，直接发送
-                        await self.context.send_message(unified_msg_origin, message_content)
+                    # 处理每个结果
+                    await self._process_message_result(result, unified_msg_origin)
             else:
                 # 如果不是异步生成器，直接处理
-                # 获取消息内容
-                if hasattr(message_generator, 'message_chain'):
-                    # 如果是消息链对象
-                    message_content = message_generator.message_chain
-                else:
-                    # 如果是字符串
-                    message_content = str(message_generator)
-                
-                # 使用context.send_message发送消息
-                # 确保message_content是正确的消息链格式
-                if isinstance(message_content, str):
-                    # 如果是字符串，需要创建MessageChain对象
-                    from astrbot.api.event import MessageChain
-                    message_chain = MessageChain().message(message_content)
-                    await self.context.send_message(unified_msg_origin, message_chain)
-                else:
-                    # 如果是消息链对象，直接发送
-                    await self.context.send_message(unified_msg_origin, message_content)
+                await self._process_message_result(message_generator, unified_msg_origin)
                 
         except Exception as e:
             self.logger.error(f"发送主动消息失败: {e}", exc_info=True)
+    
+    async def _process_message_result(self, result, unified_msg_origin):
+        """处理消息结果并发送
+        
+        Args:
+            result: 消息结果对象
+            unified_msg_origin: 消息发送目标
+        """
+        try:
+            # 获取消息内容
+            message_content = None
+            
+            # 检查result的类型并提取消息内容
+            if hasattr(result, 'message_chain'):
+                # 如果是消息链对象
+                message_content = result.message_chain
+            elif hasattr(result, 'chain'):
+                # 如果有chain属性
+                message_content = result.chain
+            elif isinstance(result, str):
+                # 如果是字符串
+                message_content = result
+            else:
+                # 尝试转换为字符串
+                message_content = str(result)
+            
+            # 使用context.send_message发送消息
+            # 确保message_content是正确的消息链格式
+            if isinstance(message_content, str):
+                # 如果是字符串，需要创建MessageChain对象
+                from astrbot.api.event import MessageChain
+                message_chain = MessageChain().message(message_content)
+                await self.context.send_message(unified_msg_origin, message_chain)
+            else:
+                # 如果是消息链对象，直接发送
+                await self.context.send_message(unified_msg_origin, message_content)
+                
+        except Exception as e:
+            self.logger.error(f"处理消息结果失败: {e}", exc_info=True)
