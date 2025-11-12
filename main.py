@@ -2352,7 +2352,10 @@ class MessageStatsPlugin(Star):
                 yield event.plain_result("本群未启用Rbot功能！")
                 return
             
-            # 修为排名不需要管理员权限，所有群成员都可以查看
+            # 检查是否是群管理员
+            if not event.is_admin():
+                yield event.plain_result("只有群管理员可以查看修为排名！")
+                return
             
             # 获取群组数据
             users = await self.data_manager.get_group_data(group_id)
@@ -2392,7 +2395,10 @@ class MessageStatsPlugin(Star):
                 yield event.plain_result("本群未启用Rbot功能！")
                 return
             
-            # 阅历排行不需要管理员权限，所有群成员都可以查看
+            # 检查是否是群管理员
+            if not event.is_admin():
+                yield event.plain_result("只有群管理员可以查看阅历排行！")
+                return
             
             # 获取群组数据
             users = await self.data_manager.get_group_data(group_id)
@@ -2495,15 +2501,34 @@ class MessageStatsPlugin(Star):
             if not self._is_rbot_enabled_for_group(group_id):
                 return
             
-            # 检查是否是Rbot管理员
-            if not self._is_rbot_admin(user_id):
-                return
-            
             # 获取消息内容
             message_str = getattr(event, 'message_str', '')
             
+            # 跳过命令消息（以%或/开头）
+            if message_str.startswith(('%', '/')):
+                return
+            
+            # 检查是否包含@用户和修为/阅历/积分操作
+            if '@' not in message_str or not any(keyword in message_str for keyword in ['修为', '阅历', '积分']):
+                return
+            
+            # 获取消息中的@用户信息
+            at_users = getattr(event, 'at_users', [])
+            if not at_users:
+                # 如果没有at_users属性，尝试从消息中解析
+                import re
+                at_matches = re.findall(r'@([^\s]+)', message_str)
+                if not at_matches:
+                    return
+            else:
+                # 使用at_users中的用户ID
+                at_user_ids = [str(user.get('user_id', '')) for user in at_users if user.get('user_id')]
+                if not at_user_ids:
+                    return
+            
             # 解析@用户和操作指令
-            await self._parse_admin_command(event, group_id, user_id, message_str)
+            async for result in self._parse_admin_command(event, group_id, user_id, message_str):
+                yield result
             
         except Exception as e:
             self.logger.error(f"Rbot管理员命令处理失败: {e}", exc_info=True)
@@ -2518,10 +2543,6 @@ class MessageStatsPlugin(Star):
             message_str: 消息内容
         """
         try:
-            # 检查是否包含@用户
-            if '@' not in message_str:
-                return
-            
             # 解析@用户和操作
             import re
             
@@ -2542,7 +2563,8 @@ class MessageStatsPlugin(Star):
                     operation = match.group(0)
                     
                     # 执行操作
-                    await self._execute_admin_operation(event, group_id, target_name, operation)
+                    async for result in self._execute_admin_operation(event, group_id, target_name, operation):
+                        yield result
                     break
                     
         except Exception as e:
@@ -2558,15 +2580,43 @@ class MessageStatsPlugin(Star):
             operation: 操作内容
         """
         try:
+            # 获取操作者ID
+            admin_id = event.get_sender_id()
+            
+            # 检查权限：只有群管理员或Rbot管理员才能执行操作
+            if not event.is_admin() and not self._is_rbot_admin(str(admin_id)):
+                yield event.plain_result("只有群管理员或Rbot管理员可以执行此操作！")
+                return
+            
             # 获取群组数据
             users = await self.data_manager.get_group_data(group_id)
             
-            # 查找目标用户（模糊匹配昵称）
+            # 尝试获取@用户的用户ID
+            at_users = getattr(event, 'at_users', [])
+            target_user_id = None
+            
+            if at_users:
+                # 从at_users中获取用户ID
+                for user in at_users:
+                    if user.get('user_id'):
+                        target_user_id = str(user.get('user_id'))
+                        break
+            
+            # 查找目标用户（优先使用用户ID，其次使用昵称）
             target_user = None
-            for user in users:
-                if target_name in user.nickname or user.nickname in target_name:
-                    target_user = user
-                    break
+            if target_user_id:
+                # 使用用户ID查找
+                for user in users:
+                    if user.user_id == target_user_id:
+                        target_user = user
+                        break
+            
+            if not target_user:
+                # 使用昵称模糊匹配
+                for user in users:
+                    if target_name in user.nickname or user.nickname in target_name:
+                        target_user = user
+                        break
             
             if not target_user:
                 yield event.plain_result(f"未找到用户：{target_name}")
@@ -2585,7 +2635,7 @@ class MessageStatsPlugin(Star):
                         target_user.add_cultivation(amount)
                         new_value = target_user.cultivation
                         action = "增加" if amount > 0 else "减少"
-                        yield event.plain_result(f"修改{target_user.nickname}修为{action}{abs(amount)}，当前修为{new_value}")
+                        yield event.plain_result(f"修改{target_user.nickname}群员，修为{action}{abs(amount)}，当前修为{new_value}")
                 elif '设置修为' in operation:
                     # 设置修为
                     match = re.search(r'设置修为(\d+)', operation)
@@ -2594,7 +2644,7 @@ class MessageStatsPlugin(Star):
                         old_value = target_user.cultivation
                         target_user.cultivation = amount
                         new_value = target_user.cultivation
-                        yield event.plain_result(f"修改{target_user.nickname}修为为{new_value}，当前修为{new_value}")
+                        yield event.plain_result(f"修改{target_user.nickname}群员，修为{new_value}，当前修为{new_value}")
                         
             elif '阅历' in operation:
                 if '+' in operation or '-' in operation:
@@ -2606,7 +2656,7 @@ class MessageStatsPlugin(Star):
                         target_user.add_experience(amount)
                         new_value = target_user.experience
                         action = "增加" if amount > 0 else "减少"
-                        yield event.plain_result(f"修改{target_user.nickname}阅历{action}{abs(amount)}，当前阅历{new_value}")
+                        yield event.plain_result(f"修改{target_user.nickname}群员，阅历{action}{abs(amount)}，当前阅历{new_value}")
                 elif '设置阅历' in operation:
                     # 设置阅历
                     match = re.search(r'设置阅历(\d+)', operation)
@@ -2615,7 +2665,7 @@ class MessageStatsPlugin(Star):
                         old_value = target_user.experience
                         target_user.experience = amount
                         new_value = target_user.experience
-                        yield event.plain_result(f"修改{target_user.nickname}阅历为{new_value}，当前阅历{new_value}")
+                        yield event.plain_result(f"修改{target_user.nickname}群员，阅历{new_value}，当前阅历{new_value}")
                         
             elif '积分' in operation:
                 if '+' in operation or '-' in operation:
@@ -2627,7 +2677,7 @@ class MessageStatsPlugin(Star):
                         target_user.add_points(amount)
                         new_value = target_user.points
                         action = "增加" if amount > 0 else "减少"
-                        yield event.plain_result(f"修改{target_user.nickname}积分{action}{abs(amount)}，当前积分{new_value}")
+                        yield event.plain_result(f"修改{target_user.nickname}群员，积分{action}{abs(amount)}，当前积分{new_value}")
                 elif '设置积分' in operation:
                     # 设置积分
                     match = re.search(r'设置积分(\d+)', operation)
@@ -2636,7 +2686,7 @@ class MessageStatsPlugin(Star):
                         old_value = target_user.points
                         target_user.points = amount
                         new_value = target_user.points
-                        yield event.plain_result(f"修改{target_user.nickname}积分为{new_value}，当前积分{new_value}")
+                        yield event.plain_result(f"修改{target_user.nickname}群员，积分为{new_value}，当前积分{new_value}")
             
             # 保存用户数据
             await self.data_manager.save_group_data(group_id, users)
@@ -2726,13 +2776,45 @@ class MessageStatsPlugin(Star):
                 # 给前10名发放灵石奖励
                 rewards = [100, 80, 60, 50, 40, 30, 20, 15, 10, 5]  # 第1名100灵石，第10名5灵石
                 
+                # 准备获奖名单消息
+                reward_msg = "🎉 每周阅历排行榜奖励发放 🎉\n━━━━━━━━━━━━━━\n"
+                
                 for i, user in enumerate(sorted_users[:10]):
                     if i < len(rewards):
                         user.add_spirit_stones(rewards[i])
+                        reward_msg += f"第{i+1}名：{user.nickname} 获得灵石+{rewards[i]}\n"
                         self.logger.info(f"阅历奖励：{user.nickname} 获得灵石+{rewards[i]}（第{i+1}名）")
                 
                 # 保存群组数据
                 await self.data_manager.save_group_data(group_id, users)
                 
+                # 发送获奖名单消息到群组
+                await self._send_weekly_reward_message(group_id, reward_msg)
+                
         except Exception as e:
             self.logger.error(f"发放每周阅历奖励失败: {e}", exc_info=True)
+    
+    async def _send_weekly_reward_message(self, group_id: str, message: str):
+        """发送每周奖励消息到群组
+        
+        Args:
+            group_id (str): 群组ID
+            message (str): 要发送的消息
+        """
+        try:
+            # 检查是否有该群组的unified_msg_origin
+            if str(group_id) not in self.group_unified_msg_origins:
+                self.logger.warning(f"无法发送奖励消息到群组 {group_id}：缺少unified_msg_origin")
+                return
+            
+            # 获取unified_msg_origin
+            unified_msg_origin = self.group_unified_msg_origins[str(group_id)]
+            
+            # 创建一个模拟的事件对象用于发送消息
+            # 使用context.send_message发送消息
+            await self.context.send_message(unified_msg_origin, message)
+            
+            self.logger.info(f"已发送每周奖励消息到群组 {group_id}")
+            
+        except Exception as e:
+            self.logger.error(f"发送每周奖励消息失败: {e}", exc_info=True)
