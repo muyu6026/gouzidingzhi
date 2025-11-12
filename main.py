@@ -3204,10 +3204,8 @@ class MessageStatsPlugin(Star):
             # 使用context.send_message发送消息
             # 确保message_content是正确的消息链格式
             if isinstance(message_content, str):
-                # 如果是字符串，需要创建MessageChain对象
-                from astrbot.api.event import MessageChain
-                message_chain = MessageChain().message(message_content)
-                await self.context.send_message(unified_msg_origin, message_chain)
+                # 如果是字符串，直接发送字符串
+                await self.context.send_message(unified_msg_origin, message_content)
             else:
                 # 如果是消息链对象，直接发送
                 await self.context.send_message(unified_msg_origin, message_content)
