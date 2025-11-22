@@ -3282,6 +3282,7 @@ class MessageStatsPlugin(Star):
             
             # 获取消息内容
             message_content = None
+            message_text = None
             
             # 检查result的类型并提取消息内容
             if hasattr(result, 'message_chain'):
@@ -3290,6 +3291,10 @@ class MessageStatsPlugin(Star):
             elif hasattr(result, 'chain'):
                 # 如果有chain属性
                 message_content = result.chain
+            elif hasattr(result, 'text') and hasattr(result, 'type'):
+                # 如果是Plain组件对象（如问题中提到的Plain(type=<ComponentType.Plain: 'Plain'>, text='...', convert=True)）
+                message_text = result.text
+                message_content = MessageChain().message(message_text)
             elif isinstance(result, str):
                 # 如果是字符串，创建MessageChain对象
                 message_content = MessageChain().message(result)
