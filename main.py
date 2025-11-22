@@ -361,8 +361,6 @@ class MessageStatsPlugin(Star):
     async def _collect_group_unified_msg_origins(self):
         """收集所有群组的unified_msg_origin（从缓存中获取）"""
         # 这个方法用于初始化时的批量收集
-        # 由于没有event对象，我们先返回空字典
-        # 实际的收集将在命令执行时进行
         return self.group_unified_msg_origins.copy()
     
     # ========== 类常量定义 ==========
@@ -3233,12 +3231,12 @@ class MessageStatsPlugin(Star):
                 await self.data_manager.save_group_data(group_id, users)
                 
                 # 使用_send_active_message发送消息
-                result = event.plain_result(f"{user_name} {message}")
-                await self._send_active_message(event, result)
+                # result = event.plain_result(f"{user_name} {message}")
+                await self._send_active_message(event, f"{user_name} {message}")
             else:
                 # 使用_send_active_message发送消息
-                result = event.plain_result(f"{user_name} {message}")
-                await self._send_active_message(event, result)
+                # result = event.plain_result(f"{user_name} {message}")
+                await self._send_active_message(event, f"{user_name} {message}")
                 
         except Exception as e:
             self.logger.error(f"执行签到操作失败: {e}", exc_info=True)
@@ -3277,6 +3275,7 @@ class MessageStatsPlugin(Star):
             result: 消息结果对象
             unified_msg_origin: 消息发送目标
         """
+        
         try:
             # 导入MessageChain
             from astrbot.api.event import MessageChain
