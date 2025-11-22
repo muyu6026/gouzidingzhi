@@ -97,7 +97,7 @@ class ExceptionHandler:
         return default_return
 
 
-def safe_execute(default_return=None, log_level="error", include_traceback=True):
+def safe_execute(default_return=None, log_level="error", include_traceback=True, custom_exception_handler=None):
     """通用异常处理装饰器
     
     为函数添加异常处理功能，自动捕获和处理常见异常类型。
@@ -106,6 +106,7 @@ def safe_execute(default_return=None, log_level="error", include_traceback=True)
         default_return: 异常时的默认返回值
         log_level: 日志级别 ("error", "warning", "info")
         include_traceback: 是否包含详细错误堆栈信息
+        custom_exception_handler: 自定义异常处理器函数，接收异常对象并返回是否已处理
         
     Returns:
         装饰后的函数
@@ -135,6 +136,13 @@ def safe_execute(default_return=None, log_level="error", include_traceback=True)
             except asyncio.TimeoutError as e:
                 return ExceptionHandler.handle_timeout_error(func.__name__, e, default_return)
             except Exception as e:
+                # 如果有自定义异常处理器，先调用它
+                if custom_exception_handler:
+                    handled = custom_exception_handler(e)
+                    if handled:
+                        # 异常已被自定义处理器处理，返回默认值
+                        return default_return
+                
                 # 捕获所有其他异常
                 log_message = f"{func.__name__} 发生未知错误: {e}"
                 if include_traceback:
@@ -160,6 +168,13 @@ def safe_execute(default_return=None, log_level="error", include_traceback=True)
             except (RuntimeError, NotImplementedError) as e:
                 return ExceptionHandler.handle_runtime_error(func.__name__, e, default_return)
             except Exception as e:
+                # 如果有自定义异常处理器，先调用它
+                if custom_exception_handler:
+                    handled = custom_exception_handler(e)
+                    if handled:
+                        # 异常已被自定义处理器处理，返回默认值
+                        return default_return
+                
                 # 捕获所有其他异常
                 log_message = f"{func.__name__} 发生未知错误: {e}"
                 if include_traceback:
