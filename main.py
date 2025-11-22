@@ -2995,7 +2995,7 @@ class MessageStatsPlugin(Star):
             self.logger.error(f"每日签到状态重置失败: {e}", exc_info=True)
     
     async def _weekly_experience_reset(self):
-        """每周重置阅历的定时任务"""
+        """每周奖励发放的定时任务（优化版：不清空修为和阅历，只发送奖励通知）"""
         try:
             from datetime import datetime, timedelta
             
@@ -3003,23 +3003,25 @@ class MessageStatsPlugin(Star):
             now = datetime.now()
             current_weekday = now.weekday()
             
-            # 检查是否是重置日
+            # 检查是否是奖励发放日
             if current_weekday == self.plugin_config.rbot_weekly_reset_day:
-                # 检查是否已经执行过重置（避免一天内多次执行）
+                # 检查是否已经执行过奖励发放（避免一天内多次执行）
                 today_str = now.strftime("%Y-%m-%d")
                 last_reset_key = "last_experience_reset"
                 
-                # 从配置中获取上次重置日期
+                # 从配置中获取上次奖励发放日期
                 config = await self.data_manager.get_config()
                 last_reset_date = getattr(config, last_reset_key, None)
                 
                 if last_reset_date == today_str:
-                    return  # 今天已经重置过了
+                    return  # 今天已经发放过奖励了
                 
                 # 获取所有群组
                 all_groups = await self.data_manager.get_all_groups()
                 
-                reset_count = 0
+                # 收集所有需要奖励的用户信息（基于当前阅历值）
+                all_users_for_rewards = []
+                
                 for group_id in all_groups:
                     # 检查群组是否启用了Rbot功能
                     if not self._is_rbot_enabled_for_group(group_id):
@@ -3031,26 +3033,30 @@ class MessageStatsPlugin(Star):
                     if not users:
                         continue
                     
-                    # 重置所有用户的阅历
-                    for user in users:
-                        if user.experience > 0:
-                            user.reset_experience()
-                            reset_count += 1
+                    # 按阅历排序并记录前10名（用于奖励）
+                    sorted_users = sorted(users, key=lambda x: x.experience, reverse=True)
+                    top_users = sorted_users[:10]
                     
-                    # 保存群组数据
-                    await self.data_manager.save_group_data(group_id, users)
+                    # 记录需要奖励的用户信息（包含群组ID）
+                    for i, user in enumerate(top_users):
+                        if user.experience > 0:
+                            all_users_for_rewards.append({
+                                'group_id': group_id,
+                                'user': user,
+                                'rank': i + 1
+                            })
                 
-                # 更新最后重置日期
+                # 更新最后奖励发放日期
                 setattr(config, last_reset_key, today_str)
                 await self.data_manager.save_config(config)
                 
-                self.logger.info(f"每周阅历重置完成，共重置 {reset_count} 个用户的阅历")
+                self.logger.info(f"每周奖励发放完成，共为 {len(all_users_for_rewards)} 个用户发放奖励（修为和阅历保留）")
                 
-                # 给阅历排行榜前10名发放灵石奖励
-                await self._give_weekly_rewards()
+                # 给阅历排行榜前10名发放灵石奖励（只推送一次）
+                await self._give_weekly_rewards_optimized(all_users_for_rewards)
                 
         except Exception as e:
-            self.logger.error(f"每周阅历重置失败: {e}", exc_info=True)
+            self.logger.error(f"每周奖励发放失败: {e}", exc_info=True)
     
     async def _give_weekly_rewards(self):
         """给阅历排行榜前10名发放灵石奖励"""
@@ -3102,6 +3108,72 @@ class MessageStatsPlugin(Star):
                 
         except Exception as e:
             self.logger.error(f"发放每周阅历奖励失败: {e}", exc_info=True)
+    
+    async def _give_weekly_rewards_optimized(self, all_users_for_rewards):
+        """优化的每周阅历奖励发放方法（只推送一次）
+        
+        Args:
+            all_users_for_rewards: 所有需要奖励的用户信息列表
+        """
+        try:
+            if not all_users_for_rewards:
+                return
+            
+            # 按群组分组
+            groups_rewards = {}
+            rewards = [100, 80, 60, 50, 40, 30, 20, 15, 10, 5]  # 第1名100灵石，第10名5灵石
+            
+            for user_info in all_users_for_rewards:
+                group_id = user_info['group_id']
+                user = user_info['user']
+                rank = user_info['rank']
+                
+                if group_id not in groups_rewards:
+                    groups_rewards[group_id] = []
+                
+                # 发放奖励
+                if rank <= len(rewards):
+                    user.add_spirit_stones(rewards[rank-1])
+                    groups_rewards[group_id].append({
+                        'user': user,
+                        'rank': rank,
+                        'reward': rewards[rank-1]
+                    })
+            
+            # 为每个群组保存数据并发送消息
+            for group_id, reward_users in groups_rewards.items():
+                # 获取群组用户数据
+                users = await self.data_manager.get_group_data(group_id)
+                if users:
+                    # 保存群组数据
+                    await self.data_manager.save_group_data(group_id, users)
+                
+                # 准备获奖名单消息
+                reward_msg = "🎉 每周阅历排行榜奖励发放 🎉\n━━━━━━━━━━━━━━\n"
+                
+                for user_info in reward_users:
+                    user = user_info['user']
+                    rank = user_info['rank']
+                    reward = user_info['reward']
+                    
+                    # 添加排名图标
+                    if rank == 1:
+                        rank_icon = "🥇"
+                    elif rank == 2:
+                        rank_icon = "🥈"
+                    elif rank == 3:
+                        rank_icon = "🥉"
+                    else:
+                        rank_icon = f"第{rank}名"
+                    
+                    reward_msg += f"{rank_icon}：{user.nickname} 获得灵石+{reward} 💰\n"
+                    self.logger.info(f"阅历奖励：{user.nickname} 获得灵石+{reward}（第{rank}名）")
+                
+                # 发送获奖名单消息到群组
+                await self._send_weekly_reward_message(group_id, reward_msg)
+                
+        except Exception as e:
+            self.logger.error(f"发放每周阅历奖励失败(优化版): {e}", exc_info=True)
     
     async def _send_weekly_reward_message(self, group_id: str, message: str):
         """发送每周奖励消息到群组
@@ -3159,7 +3231,16 @@ class MessageStatsPlugin(Star):
                 # 处理查看个人信息命令
                 async for result in self.rbot_user_info(event):
                     # 使用主动消息发送API
-                    await self._send_active_message(event, result)
+                    # 检查result是否是生成器结果，如果是，需要提取实际内容
+                    if hasattr(result, 'message_chain') or hasattr(result, 'chain'):
+                        # 如果是消息链对象，直接发送
+                        await self._send_active_message(event, result)
+                    elif hasattr(result, 'text') and hasattr(result, 'type'):
+                        # 如果是Plain组件对象，提取文本内容
+                        await self._send_active_message(event, result.text)
+                    else:
+                        # 其他情况，直接发送
+                        await self._send_active_message(event, result)
                     
             elif message_str == "查看修为排名":
                 # 检查是否是群管理员
@@ -3167,7 +3248,16 @@ class MessageStatsPlugin(Star):
                     # 处理查看修为排名命令
                     async for result in self.rbot_cultivation_rank(event):
                         # 使用主动消息发送API
-                        await self._send_active_message(event, result)
+                        # 检查result是否是生成器结果，如果是，需要提取实际内容
+                        if hasattr(result, 'message_chain') or hasattr(result, 'chain'):
+                            # 如果是消息链对象，直接发送
+                            await self._send_active_message(event, result)
+                        elif hasattr(result, 'text') and hasattr(result, 'type'):
+                            # 如果是Plain组件对象，提取文本内容
+                            await self._send_active_message(event, result.text)
+                        else:
+                            # 其他情况，直接发送
+                            await self._send_active_message(event, result)
                         
             elif message_str == "查看阅历排行":
                 # 检查是否是群管理员
@@ -3175,13 +3265,31 @@ class MessageStatsPlugin(Star):
                     # 处理查看阅历排行命令
                     async for result in self.rbot_experience_rank(event):
                         # 使用主动消息发送API
-                        await self._send_active_message(event, result)
+                        # 检查result是否是生成器结果，如果是，需要提取实际内容
+                        if hasattr(result, 'message_chain') or hasattr(result, 'chain'):
+                            # 如果是消息链对象，直接发送
+                            await self._send_active_message(event, result)
+                        elif hasattr(result, 'text') and hasattr(result, 'type'):
+                            # 如果是Plain组件对象，提取文本内容
+                            await self._send_active_message(event, result.text)
+                        else:
+                            # 其他情况，直接发送
+                            await self._send_active_message(event, result)
                         
             elif message_str == "帮助":
                 # 处理帮助命令
                 async for result in self.rbot_help(event):
                     # 使用主动消息发送API
-                    await self._send_active_message(event, result)
+                    # 检查result是否是生成器结果，如果是，需要提取实际内容
+                    if hasattr(result, 'message_chain') or hasattr(result, 'chain'):
+                        # 如果是消息链对象，直接发送
+                        await self._send_active_message(event, result)
+                    elif hasattr(result, 'text') and hasattr(result, 'type'):
+                        # 如果是Plain组件对象，提取文本内容
+                        await self._send_active_message(event, result.text)
+                    else:
+                        # 其他情况，直接发送
+                        await self._send_active_message(event, result)
                         
         except Exception as e:
             self.logger.error(f"处理Rbot命令失败: {e}", exc_info=True)
@@ -3295,6 +3403,15 @@ class MessageStatsPlugin(Star):
                 # 如果是Plain组件对象（如问题中提到的Plain(type=<ComponentType.Plain: 'Plain'>, text='...', convert=True)）
                 message_text = result.text
                 message_content = MessageChain().message(message_text)
+            elif hasattr(result, '__class__') and 'Plain' in str(result.__class__):
+                # 更精确地检测Plain组件对象
+                # 检查是否有text属性
+                if hasattr(result, 'text'):
+                    message_text = result.text
+                    message_content = MessageChain().message(message_text)
+                else:
+                    # 如果没有text属性，尝试转换为字符串
+                    message_content = MessageChain().message(str(result))
             elif isinstance(result, str):
                 # 如果是字符串，创建MessageChain对象
                 message_content = MessageChain().message(result)
