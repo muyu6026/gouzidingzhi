@@ -458,6 +458,8 @@ class MessageStatsPlugin(Star):
             self.logger.warning(f"图片生成器初始化失败: {e}")
             self.logger.warning("💡 提示: 如果需要图片功能，请运行 'playwright install' 命令安装浏览器")
             self.logger.warning("📝 注意: 即使图片功能不可用，排行榜仍会以文字模式显示")
+            # 不设置image_generator为None，让它尝试在需要时重新初始化
+            # 这样可以支持后续的图片生成尝试
         
         # 记录当前配置状态
         self.logger.info(f"当前配置: 图片模式={self.plugin_config.if_send_pic}, 显示人数={self.plugin_config.rand}, 自动记录={self.plugin_config.auto_record_enabled}")
@@ -567,10 +569,10 @@ class MessageStatsPlugin(Star):
         """
         self.initialized = True
         
-        # 插件初始化完成后，尝试启动定时任务
+        # 插件初始化完成后，延迟启动定时任务
         if self.timer_manager and self.plugin_config.timer_enabled:
             try:
-                self.logger.info("插件初始化完成，尝试启动定时任务...")
+                self.logger.info("插件初始化完成，将在有群组数据后启动定时任务...")
                 # 确保unified_msg_origin映射表被正确传递
                 if hasattr(self.timer_manager, 'push_service'):
                     self.timer_manager.push_service.group_unified_msg_origins = self.group_unified_msg_origins
@@ -578,16 +580,26 @@ class MessageStatsPlugin(Star):
                 else:
                     self.logger.warning("定时任务管理器未完全初始化，无法更新unified_msg_origin映射表")
                 
-                success = await self.timer_manager.update_config(self.plugin_config, self.group_unified_msg_origins)
-                if success:
-                    self.logger.info("定时任务启动成功")
-                else:
-                    self.logger.warning("定时任务启动失败，可能是因为群组unified_msg_origin尚未收集")
-                    if self.plugin_config.timer_target_groups:
+                # 检查是否有群组数据
+                if self.group_unified_msg_origins and self.plugin_config.timer_target_groups:
+                    # 如果有群组数据和目标群组，尝试启动定时任务
+                    success = await self.timer_manager.update_config(self.plugin_config, self.group_unified_msg_origins)
+                    if success:
+                        self.logger.info("定时任务启动成功")
+                    else:
+                        self.logger.warning("定时任务启动失败，可能是因为群组unified_msg_origin尚未收集")
                         missing_groups = [g for g in self.plugin_config.timer_target_groups if g not in self.group_unified_msg_origins]
                         if missing_groups:
                             self.logger.info(f"缺少unified_msg_origin的群组: {missing_groups}")
                             self.logger.info("💡 提示: 在这些群组中发送任意消息以收集unified_msg_origin")
+                else:
+                    # 如果没有群组数据或目标群组，等待后续收集
+                    self.logger.info("等待群组数据收集，定时任务将在收集到unified_msg_origin后自动启动")
+                    if not self.group_unified_msg_origins:
+                        self.logger.info("💡 提示: 在群组中发送任意消息以收集unified_msg_origin")
+                    elif not self.plugin_config.timer_target_groups:
+                        self.logger.info("💡 提示: 使用 #设置定时群组 命令设置目标群组")
+                        
             except (ImportError, AttributeError, RuntimeError) as e:
                 self.logger.warning(f"定时任务启动失败: {e}")
                 # 不影响插件的正常使用

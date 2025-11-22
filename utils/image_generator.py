@@ -289,6 +289,11 @@ class ImageGenerator:
             if "Executable doesn't exist" in str(e) or "playwright install" in str(e):
                 self.logger.error("💡 提示: 请运行 'playwright install' 命令安装浏览器")
                 self.logger.error("📝 安装完成后重启机器人即可使用图片生成功能")
+                self.logger.error("🔄 当前将自动降级到文字模式，不影响其他功能使用")
+                # 不抛出异常，而是设置browser为None，让系统降级到文字模式
+                self.browser = None
+                self.playwright = None
+                return
             raise ImageGenerationError(f"初始化失败: {e}")
     
     async def cleanup(self):

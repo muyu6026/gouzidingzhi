@@ -662,8 +662,9 @@ class TimerManager:
             
             # 验证目标群组
             if not config.timer_target_groups:
-                self.logger.error("未配置目标群组")
-                return False
+                self.logger.warning("未配置目标群组，定时任务将等待配置")
+                # 不返回False，允许定时任务启动，但会在实际推送时检查
+                return True
             
             # 验证群组的unified_msg_origin可用性
             missing_origins = []
