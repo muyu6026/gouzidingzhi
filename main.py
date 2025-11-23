@@ -205,7 +205,7 @@ MAX_RANK_COUNT = 100
 RANK_COUNT_KEY = 'rand'
 IMAGE_MODE_KEY = 'if_send_pic'
 
-@register("stats", "xiaoruange39", "群发言统计插件", "1.6.1")
+@register("stats", "xiaoruange39", "群发言统计插件", "1.6.2")
 class MessageStatsPlugin(Star):
     """群发言统计插件
     
@@ -3010,25 +3010,15 @@ class MessageStatsPlugin(Star):
             
             # 检查是否是奖励发放日
             if current_weekday == self.plugin_config.rbot_weekly_reset_day:
-                # 检查是否已经执行过奖励发放（避免一天内多次执行）
-                today_str = now.strftime("%Y-%m-%d")
-                last_reset_key = "last_experience_reset"
-                
-                # 从配置中获取上次奖励发放日期
-                config = await self.data_manager.get_config()
-                last_reset_date = getattr(config, last_reset_key, None)
-                
-                if last_reset_date == today_str:
-                    self.logger.info(f"今天({today_str})已经发放过奖励了，跳过")
-                    return  # 今天已经发放过奖励了
-                
                 # 获取当前周数，确保每周只发放一次
                 current_week = now.isocalendar().week
                 current_year = now.year
                 week_key = f"last_experience_reset_week_{current_year}"
                 
-                # 检查本周是否已经发放过奖励
+                # 从配置中获取本周是否已经发放过奖励
+                config = await self.data_manager.get_config()
                 last_reset_week = getattr(config, week_key, None)
+                
                 if last_reset_week == current_week:
                     self.logger.info(f"本周({current_year}年第{current_week}周)已经发放过奖励了，跳过")
                     return  # 本周已经发放过奖励了
@@ -3063,8 +3053,7 @@ class MessageStatsPlugin(Star):
                                 'rank': i + 1
                             })
                 
-                # 更新最后奖励发放日期和周数
-                setattr(config, last_reset_key, today_str)
+                # 更新最后奖励发放周数
                 setattr(config, week_key, current_week)
                 await self.data_manager.save_config(config)
                 
@@ -3174,12 +3163,20 @@ class MessageStatsPlugin(Star):
                         'reward': rewards[rank-1]
                     })
             
-            # 标记本周已发送奖励
+            # 标记本周已发送奖励（在发送消息前标记，防止重复）
             setattr(config, reward_sent_key, current_week)
             await self.data_manager.save_config(config)
             
             # 为每个群组保存数据并发送消息
             for group_id, reward_users in groups_rewards.items():
+                # 检查群组是否已经发送过本周奖励
+                group_reward_key = f"weekly_reward_sent_group_{group_id}_{current_year}"
+                group_reward_sent_week = getattr(config, group_reward_key, None)
+                
+                if group_reward_sent_week == current_week:
+                    self.logger.info(f"群组{group_id}本周({current_year}年第{current_week}周)已经发送过奖励消息了，跳过")
+                    continue
+                
                 # 获取群组用户数据
                 users = await self.data_manager.get_group_data(group_id)
                 if users:
@@ -3206,6 +3203,10 @@ class MessageStatsPlugin(Star):
                     
                     reward_msg += f"{rank_icon}：{user.nickname} 获得灵石+{reward} 💰\n"
                     self.logger.info(f"阅历奖励：{user.nickname} 获得灵石+{reward}（第{rank}名）")
+                
+                # 标记群组本周已发送奖励
+                setattr(config, group_reward_key, current_week)
+                await self.data_manager.save_config(config)
                 
                 # 发送获奖名单消息到群组
                 await self._send_weekly_reward_message(group_id, reward_msg)
