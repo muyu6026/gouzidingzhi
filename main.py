@@ -71,27 +71,7 @@ class JsonHandler:
         
         return True
     
-    @staticmethod
-    def 读取Json字典(文件名: str) -> dict:
-        """从JSON文件读取数据并返回字典"""
-        try:
-            # 从JSON文件读取完整数据
-            文件路径 = JsonHandler.获取文件路径(文件名, True)
-            if os.path.exists(文件路径):
-                try:
-                    with open(文件路径, 'r', encoding='utf-8') as f:
-                        return json.load(f) if f.read().strip() else {}
-                except Exception as e:
-                    astrbot_logger.error(f"读取JSON文件失败: {e}")
-            return {}
-        except Exception as e:
-            astrbot_logger.error(f"读取数据错误: {e}")
-            return {}
     
-    @staticmethod
-    def 获取值(数据字典: dict, 键: str, 默认值: any = None) -> any:
-        """安全地从字典中获取值"""
-        return 数据字典.get(键, 默认值)
     
     @staticmethod
     def 获取文件路径(文件名: str, 确保目录存在: bool = False) -> str:
@@ -186,7 +166,7 @@ class JsonHandler:
             return {}
     
     @staticmethod
-    def 获取值(字典: dict, 键: str, 默认值: str = None) -> str:
+    def 获取值(字典: dict, 键: str, 默认值: any = None) -> any:
         """根据键获取值，如果键不存在返回默认值"""
         if 字典 is not None and 键 in 字典:
             return 字典[键]
@@ -3233,8 +3213,8 @@ class MessageStatsPlugin(Star):
                 if has_signed_today:
                     # 获取用户显示名称
                     user_name = await self._get_user_display_name(event, group_id, user_id)
-                    # 使用主动消息发送API发送已签到消息
-                    await self._send_active_message(event, f"{user_name} 今天已经签到过了，请明天再来！")
+                    # 使用安全发送消息API发送已签到消息
+                    await self._safe_send_message(event, f"{user_name} 今天已经签到过了，请明天再来！")
                 else:
                     # 直接执行签到逻辑，避免重复调用导致延迟
                     await self._execute_sign_in(event, group_id, user_id)
@@ -3242,66 +3222,30 @@ class MessageStatsPlugin(Star):
             elif message_str == "查看个人信息":
                 # 处理查看个人信息命令
                 async for result in self.rbot_user_info(event):
-                    # 使用主动消息发送API
-                    # 检查result是否是生成器结果，如果是，需要提取实际内容
-                    if hasattr(result, 'message_chain') or hasattr(result, 'chain'):
-                        # 如果是消息链对象，直接发送
-                        await self._send_active_message(event, result)
-                    elif hasattr(result, 'text') and hasattr(result, 'type'):
-                        # 如果是Plain组件对象，提取文本内容
-                        await self._send_active_message(event, result.text)
-                    else:
-                        # 其他情况，直接发送
-                        await self._send_active_message(event, result)
+                    # 使用安全发送消息API
+                    await self._safe_send_message(event, result)
                     
             elif message_str == "查看修为排名":
                 # 检查是否是群管理员
                 if event.is_admin():
                     # 处理查看修为排名命令
                     async for result in self.rbot_cultivation_rank(event):
-                        # 使用主动消息发送API
-                        # 检查result是否是生成器结果，如果是，需要提取实际内容
-                        if hasattr(result, 'message_chain') or hasattr(result, 'chain'):
-                            # 如果是消息链对象，直接发送
-                            await self._send_active_message(event, result)
-                        elif hasattr(result, 'text') and hasattr(result, 'type'):
-                            # 如果是Plain组件对象，提取文本内容
-                            await self._send_active_message(event, result.text)
-                        else:
-                            # 其他情况，直接发送
-                            await self._send_active_message(event, result)
+                        # 使用安全发送消息API
+                        await self._safe_send_message(event, result)
                         
             elif message_str == "查看阅历排行":
                 # 检查是否是群管理员
                 if event.is_admin():
                     # 处理查看阅历排行命令
                     async for result in self.rbot_experience_rank(event):
-                        # 使用主动消息发送API
-                        # 检查result是否是生成器结果，如果是，需要提取实际内容
-                        if hasattr(result, 'message_chain') or hasattr(result, 'chain'):
-                            # 如果是消息链对象，直接发送
-                            await self._send_active_message(event, result)
-                        elif hasattr(result, 'text') and hasattr(result, 'type'):
-                            # 如果是Plain组件对象，提取文本内容
-                            await self._send_active_message(event, result.text)
-                        else:
-                            # 其他情况，直接发送
-                            await self._send_active_message(event, result)
+                        # 使用安全发送消息API
+                        await self._safe_send_message(event, result)
                         
             elif message_str == "帮助":
                 # 处理帮助命令
                 async for result in self.rbot_help(event):
-                    # 使用主动消息发送API
-                    # 检查result是否是生成器结果，如果是，需要提取实际内容
-                    if hasattr(result, 'message_chain') or hasattr(result, 'chain'):
-                        # 如果是消息链对象，直接发送
-                        await self._send_active_message(event, result)
-                    elif hasattr(result, 'text') and hasattr(result, 'type'):
-                        # 如果是Plain组件对象，提取文本内容
-                        await self._send_active_message(event, result.text)
-                    else:
-                        # 其他情况，直接发送
-                        await self._send_active_message(event, result)
+                    # 使用安全发送消息API
+                    await self._safe_send_message(event, result)
                         
         except Exception as e:
             self.logger.error(f"处理Rbot命令失败: {e}", exc_info=True)
@@ -3350,19 +3294,17 @@ class MessageStatsPlugin(Star):
                         break
                 await self.data_manager.save_group_data(group_id, users)
                 
-                # 使用_send_active_message发送消息
-                # result = event.plain_result(f"{user_name} {message}")
-                await self._send_active_message(event, f"{user_name} {message}")
+                # 使用_safe_send_message发送消息
+                await self._safe_send_message(event, f"{user_name} {message}")
             else:
-                # 使用_send_active_message发送消息
-                # result = event.plain_result(f"{user_name} {message}")
-                await self._send_active_message(event, f"{user_name} {message}")
+                # 使用_safe_send_message发送消息
+                await self._safe_send_message(event, f"{user_name} {message}")
                 
         except Exception as e:
             self.logger.error(f"执行签到操作失败: {e}", exc_info=True)
-            # 使用_send_active_message发送消息
+            # 使用_safe_send_message发送消息
             result = event.plain_result("签到失败，请稍后重试")
-            await self._send_active_message(event, result)
+            await self._safe_send_message(event, result)
     
     async def _send_active_message(self, event: AstrMessageEvent, message_generator):
         """发送主动消息
@@ -3372,18 +3314,8 @@ class MessageStatsPlugin(Star):
             message_generator: 消息生成器
         """
         try:
-            # 获取unified_msg_origin
-            unified_msg_origin = event.unified_msg_origin
-            
-            # 检查message_generator是否是异步生成器
-            if hasattr(message_generator, '__aiter__'):
-                # 如果是异步生成器，遍历它
-                async for result in message_generator:
-                    # 处理每个结果
-                    await self._process_message_result(result, unified_msg_origin)
-            else:
-                # 如果不是异步生成器，直接处理
-                await self._process_message_result(message_generator, unified_msg_origin)
+            # 使用安全发送消息方法
+            await self._safe_send_message(event, message_generator)
                 
         except Exception as e:
             self.logger.error(f"发送主动消息失败: {e}", exc_info=True)
@@ -3475,3 +3407,26 @@ class MessageStatsPlugin(Star):
                 self.logger.error(f"处理消息结果失败(属性错误): {e}", exc_info=True)
         except Exception as e:
             self.logger.error(f"处理消息结果失败: {e}", exc_info=True)
+    
+    async def _safe_send_message(self, event: AstrMessageEvent, message_content):
+        """安全发送消息，处理Plain组件显示问题
+        
+        Args:
+            event: 消息事件对象
+            message_content: 消息内容
+        """
+        try:
+            # 导入MessageChain
+            from astrbot.api.event import MessageChain
+            
+            # 如果message_content是生成器结果，需要先处理
+            if hasattr(message_content, '__aiter__'):
+                # 如果是异步生成器，遍历它
+                async for result in message_content:
+                    await self._process_message_result(result, event.unified_msg_origin)
+            else:
+                # 如果不是异步生成器，直接处理
+                await self._process_message_result(message_content, event.unified_msg_origin)
+                
+        except Exception as e:
+            self.logger.error(f"安全发送消息失败: {e}", exc_info=True)
