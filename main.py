@@ -205,7 +205,7 @@ MAX_RANK_COUNT = 100
 RANK_COUNT_KEY = 'rand'
 IMAGE_MODE_KEY = 'if_send_pic'
 
-@register("stats", "xiaoruange39", "群发言统计插件", "1.6.2")
+@register("stats", "xiaoruange39", "群发言统计插件", "1.6.3")
 class MessageStatsPlugin(Star):
     """群发言统计插件
     
@@ -493,27 +493,14 @@ class MessageStatsPlugin(Star):
     async def _initialize_rbot_timers(self):
         """初始化Rbot功能的定时任务
         
-        创建并启动每周重置阅历和每日重置签到状态的定时任务。
+        创建并启动每日重置签到状态的定时任务。
         
         Returns:
             None: 无返回值
         """
         try:
-            # 创建每周重置阅历的定时任务
+            # 创建每日重置签到状态的定时任务
             import asyncio
-            
-            async def weekly_reset_task():
-                """每周重置阅历的循环任务"""
-                while True:
-                    try:
-                        # 每小时检查一次是否需要重置阅历
-                        await self._weekly_experience_reset()
-                        # 等待1小时
-                        await asyncio.sleep(3600)
-                    except Exception as e:
-                        self.logger.error(f"每周阅历重置任务出错: {e}")
-                        # 出错后等待1小时再重试
-                        await asyncio.sleep(3600)
             
             async def daily_sign_in_reset_task():
                 """每日重置签到状态的循环任务（凌晨0点执行）"""
@@ -529,9 +516,8 @@ class MessageStatsPlugin(Star):
                         await asyncio.sleep(60)
             
             # 启动定时任务（不阻塞初始化过程）
-            asyncio.create_task(weekly_reset_task())
             asyncio.create_task(daily_sign_in_reset_task())
-            self.logger.info("Rbot定时任务已启动（每周阅历重置 + 每日签到状态重置）")
+            self.logger.info("Rbot定时任务已启动（每日签到状态重置）")
             
         except Exception as e:
             self.logger.error(f"初始化Rbot定时任务失败: {e}")
@@ -2999,71 +2985,9 @@ class MessageStatsPlugin(Star):
         except Exception as e:
             self.logger.error(f"每日签到状态重置失败: {e}", exc_info=True)
     
-    async def _weekly_experience_reset(self):
-        """每周奖励发放的定时任务（优化版：不清空修为和阅历，只发送奖励通知）"""
-        try:
-            from datetime import datetime, timedelta
-            
-            # 获取当前星期几（0-6，0是周一）
-            now = datetime.now()
-            current_weekday = now.weekday()
-            
-            # 检查是否是奖励发放日
-            if current_weekday == self.plugin_config.rbot_weekly_reset_day:
-                # 获取当前周数，确保每周只发放一次
-                current_week = now.isocalendar().week
-                current_year = now.year
-                week_key = f"last_experience_reset_week_{current_year}"
-                
-                # 从配置中获取本周是否已经发放过奖励
-                config = await self.data_manager.get_config()
-                last_reset_week = getattr(config, week_key, None)
-                
-                if last_reset_week == current_week:
-                    self.logger.info(f"本周({current_year}年第{current_week}周)已经发放过奖励了，跳过")
-                    return  # 本周已经发放过奖励了
-                
-                # 获取所有群组
-                all_groups = await self.data_manager.get_all_groups()
-                
-                # 收集所有需要奖励的用户信息（基于当前阅历值）
-                all_users_for_rewards = []
-                
-                for group_id in all_groups:
-                    # 检查群组是否启用了Rbot功能
-                    if not self._is_rbot_enabled_for_group(group_id):
-                        continue
-                    
-                    # 获取群组用户数据
-                    users = await self.data_manager.get_group_data(group_id)
-                    
-                    if not users:
-                        continue
-                    
-                    # 按阅历排序并记录前10名（用于奖励）
-                    sorted_users = sorted(users, key=lambda x: x.experience, reverse=True)
-                    top_users = sorted_users[:10]
-                    
-                    # 记录需要奖励的用户信息（包含群组ID）
-                    for i, user in enumerate(top_users):
-                        if user.experience > 0:
-                            all_users_for_rewards.append({
-                                'group_id': group_id,
-                                'user': user,
-                                'rank': i + 1
-                            })
-                
-                # 更新最后奖励发放周数
-                setattr(config, week_key, current_week)
-                await self.data_manager.save_config(config)
-                
-                self.logger.info(f"每周奖励发放完成，共为 {len(all_users_for_rewards)} 个用户发放奖励（修为和阅历保留）")
-                
-                # 给阅历排行榜前10名发放灵石奖励（只推送一次）
-                await self._give_weekly_rewards_optimized(all_users_for_rewards)
-                
-        except Exception as e:
-            self.logger.error(f"每周奖励发放失败: {e}", exc_info=True)
+    # 每周奖励发放功能已移除
+    # 原因：避免重复推送和用户投诉
+    # 如需重新启用，请恢复 _weekly_experience_reset 和相关方法
     
     async def _give_weekly_rewards(self):
         """给阅历排行榜前10名发放灵石奖励"""
@@ -3214,32 +3138,9 @@ class MessageStatsPlugin(Star):
         except Exception as e:
             self.logger.error(f"发放每周阅历奖励失败(优化版): {e}", exc_info=True)
     
-    async def _send_weekly_reward_message(self, group_id: str, message: str):
-        """发送每周奖励消息到群组
-        
-        Args:
-            group_id (str): 群组ID
-            message (str): 要发送的消息
-        """
-        try:
-            # 检查是否有该群组的unified_msg_origin
-            if str(group_id) not in self.group_unified_msg_origins:
-                self.logger.warning(f"无法发送奖励消息到群组 {group_id}：缺少unified_msg_origin")
-                return
-            
-            # 获取unified_msg_origin
-            unified_msg_origin = self.group_unified_msg_origins[str(group_id)]
-            
-            # 创建一个模拟的事件对象用于发送消息
-            # 使用context.send_message发送消息
-            from astrbot.api.event import MessageChain
-            message_chain = MessageChain().message(message)
-            await self.context.send_message(unified_msg_origin, message_chain)
-            
-            self.logger.info(f"已发送每周奖励消息到群组 {group_id}")
-            
-        except Exception as e:
-            self.logger.error(f"发送每周奖励消息失败: {e}", exc_info=True)
+    # 每周奖励消息发送功能已移除
+    # 原因：避免重复推送和用户投诉
+    # 如需重新启用，请恢复 _send_weekly_reward_message 方法
     
     async def _process_rbot_commands(self, event: AstrMessageEvent, group_id: str, user_id: str, message_str: str):
         """处理Rbot命令（不艾特机器人的情况）
