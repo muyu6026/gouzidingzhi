@@ -1063,6 +1063,128 @@ class MessageStatsPlugin(Star):
             self.logger.error(f"清除榜单失败: {e}")
             yield event.plain_result("清除榜单失败,请稍后重试！")
     
+    @filter.command("删除所有数据")
+    async def delete_all_data(self, event: AstrMessageEvent):
+        """删除所有数据 - 仅管理员可用"""
+        try:
+            # 获取用户ID
+            user_id = event.get_sender_id()
+            if not user_id:
+                yield event.plain_result("无法获取用户信息！")
+                return
+            user_id = str(user_id)
+            
+            # 检查是否是管理员
+            is_admin = False
+            
+            # 检查是否是群管理员
+            if event.is_admin():
+                is_admin = True
+            
+            # 检查是否是配置的Rbot管理员
+            if not is_admin and self._is_rbot_admin(user_id):
+                is_admin = True
+            
+            # 如果不是管理员，拒绝操作
+            if not is_admin:
+                yield event.plain_result("❌ 只有管理员可以执行此操作！")
+                return
+            
+            # 获取群组ID（可选，用于日志）
+            group_id = event.get_group_id()
+            group_id_str = str(group_id) if group_id else "未知"
+            
+            # 执行删除所有数据的操作
+            yield event.plain_result("⚠️ 正在删除所有数据，请稍候...")
+            
+            # 1. 清除所有群组数据
+            all_groups = await self.data_manager.get_all_groups()
+            cleared_groups = 0
+            
+            for group_id in all_groups:
+                success = await self.data_manager.clear_group_data(group_id)
+                if success:
+                    cleared_groups += 1
+            
+            # 2. 清除签到状态数据
+            try:
+                sign_in_data = JsonHandler.读取Json字典("sign_in_status.json")
+                sign_in_data.clear()
+                JsonHandler.写入Json字典("sign_in_status.json", sign_in_data)
+                sign_in_cleared = True
+            except Exception as e:
+                self.logger.error(f"清除签到状态数据失败: {e}")
+                sign_in_cleared = False
+            
+            # 3. 重置配置为默认值（保留基本设置）
+            try:
+                from .utils.models import PluginConfig
+                default_config = PluginConfig()
+                # 保留一些基本设置
+                current_config = await self.data_manager.get_config()
+                default_config.rand = current_config.rand
+                default_config.if_send_pic = current_config.if_send_pic
+                default_config.auto_record_enabled = current_config.auto_record_enabled
+                default_config.detailed_logging_enabled = current_config.detailed_logging_enabled
+                
+                await self.data_manager.save_config(default_config)
+                config_reset = True
+            except Exception as e:
+                self.logger.error(f"重置配置失败: {e}")
+                config_reset = False
+            
+            # 4. 停止定时任务
+            timer_stopped = False
+            if self.timer_manager:
+                try:
+                    await self.timer_manager.stop_timer()
+                    timer_stopped = True
+                except Exception as e:
+                    self.logger.error(f"停止定时任务失败: {e}")
+            
+            # 5. 清除缓存
+            try:
+                await self.data_manager.clear_cache("all")
+                cache_cleared = True
+            except Exception as e:
+                self.logger.error(f"清除缓存失败: {e}")
+                cache_cleared = False
+            
+            # 6. 清除群成员缓存
+            try:
+                self.group_members_cache.clear()
+                self.user_nickname_cache.clear()
+                members_cache_cleared = True
+            except Exception as e:
+                self.logger.error(f"清除群成员缓存失败: {e}")
+                members_cache_cleared = False
+            
+            # 发送结果报告
+            result_msg = "📊 数据删除报告\n━━━━━━━━━━━━━━\n"
+            result_msg += f"🗂️ 群组数据: 已清除 {cleared_groups}/{len(all_groups)} 个群组\n"
+            result_msg += f"📅 签到状态: {'✅ 已清除' if sign_in_cleared else '❌ 清除失败'}\n"
+            result_msg += f"⚙️ 配置重置: {'✅ 已重置' if config_reset else '❌ 重置失败'}\n"
+            result_msg += f"⏰ 定时任务: {'✅ 已停止' if timer_stopped else '❌ 停止失败'}\n"
+            result_msg += f"💾 数据缓存: {'✅ 已清除' if cache_cleared else '❌ 清除失败'}\n"
+            result_msg += f"👥 成员缓存: {'✅ 已清除' if members_cache_cleared else '❌ 清除失败'}\n"
+            result_msg += "━━━━━━━━━━━━━━\n"
+            result_msg += f"👤 操作者: {user_id}\n"
+            result_msg += f"🏷️ 群组: {group_id_str}\n"
+            result_msg += f"⏰ 操作时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+            result_msg += "\n✅ 所有数据删除完成！插件已重置为初始状态。"
+            
+            yield event.plain_result(result_msg)
+            
+            # 记录操作日志
+            self.logger.info(f"管理员 {user_id} 在群组 {group_id_str} 执行了删除所有数据操作")
+            
+        except (IOError, OSError, FileNotFoundError) as e:
+            self.logger.error(f"删除所有数据失败: {e}")
+            yield event.plain_result("❌ 删除数据失败，请稍后重试！")
+        except Exception as e:
+            self.logger.error(f"删除所有数据时发生未知错误: {e}", exc_info=True)
+            yield event.plain_result("❌ 删除数据时发生未知错误，请联系管理员！")
+    
     @filter.command("刷新发言榜群成员缓存")
     async def refresh_group_members_cache(self, event: AstrMessageEvent):
         """刷新群成员列表缓存"""
