@@ -2453,16 +2453,16 @@ class MessageStatsPlugin(Star):
                         break
                 await self.data_manager.save_group_data(group_id, users)
                 
-                # 直接返回字符串，避免Plain组件问题
-                yield f"{user_name} {message}"
+                # 使用event.plain_result发送消息
+                yield event.plain_result(f"{user_name} {message}")
             else:
-                # 直接返回字符串，避免Plain组件问题
-                yield f"{user_name} {message}"
+                # 使用event.plain_result发送消息
+                yield event.plain_result(f"{user_name} {message}")
                 
         except Exception as e:
             self.logger.error(f"Rbot签到功能出错: {e}", exc_info=True)
-            # 直接返回字符串，避免Plain组件问题
-            yield "签到失败，请稍后重试"
+            # 使用event.plain_result发送消息
+            yield event.plain_result("签到失败，请稍后重试")
     
     @filter.command("为狗子打call")
     async def rbot_sign_in_alt(self, event: AstrMessageEvent):
@@ -2511,8 +2511,8 @@ class MessageStatsPlugin(Star):
             for i, user in enumerate(experience_sorted[:10], 1):
                 rank_msg += f"📖 第{i}名：{user.nickname} - {user.experience}阅历\n"
             
-            # 直接返回字符串，避免Plain组件问题
-            yield rank_msg
+            # 使用event.plain_result发送消息
+            yield event.plain_result(rank_msg)
             
         except Exception as e:
             self.logger.error(f"查看排行信息失败: {e}", exc_info=True)
@@ -2566,13 +2566,13 @@ class MessageStatsPlugin(Star):
                 
                 rank_msg += f"{icon}：{user.nickname} - {user.cultivation}修为\n"
             
-            # 直接返回字符串，避免Plain组件问题
-            yield rank_msg
+            # 使用event.plain_result发送消息
+            yield event.plain_result(rank_msg)
             
         except Exception as e:
             self.logger.error(f"查看修为排名失败: {e}", exc_info=True)
-            # 直接返回字符串，避免Plain组件问题
-            yield "查看修为排名失败，请稍后重试"
+            # 使用event.plain_result发送消息
+            yield event.plain_result("查看修为排名失败，请稍后重试")
     
     @filter.command("查看阅历排行")
     async def rbot_experience_rank(self, event: AstrMessageEvent):
@@ -2621,13 +2621,13 @@ class MessageStatsPlugin(Star):
                 
                 rank_msg += f"{icon}：{user.nickname} - {user.experience}阅历\n"
             
-            # 直接返回字符串，避免Plain组件问题
-            yield rank_msg
+            # 使用event.plain_result发送消息
+            yield event.plain_result(rank_msg)
             
         except Exception as e:
             self.logger.error(f"查看阅历排行失败: {e}", exc_info=True)
-            # 直接返回字符串，避免Plain组件问题
-            yield "查看阅历排行失败，请稍后重试"
+            # 使用event.plain_result发送消息
+            yield event.plain_result("查看阅历排行失败，请稍后重试")
     
     @filter.command("查看个人信息")
     async def rbot_user_info(self, event: AstrMessageEvent):
@@ -2687,13 +2687,13 @@ class MessageStatsPlugin(Star):
             info_msg += "⚙️ 管理员功能：@用户 阅历+100（设置阅历）\n"
             info_msg += "⚙️ 管理员功能：@用户 积分+100（设置积分）"
             
-            # 直接返回字符串，避免Plain组件问题
-            yield info_msg
+            # 使用event.plain_result发送消息
+            yield event.plain_result(info_msg)
             
         except Exception as e:
             self.logger.error(f"查看个人信息失败: {e}", exc_info=True)
-            # 直接返回字符串，避免Plain组件问题
-            yield "查看个人信息失败，请稍后重试"
+            # 使用event.plain_result发送消息
+            yield event.plain_result("查看个人信息失败，请稍后重试")
     
     @filter.command("帮助")
     async def rbot_help(self, event: AstrMessageEvent):
@@ -2744,13 +2744,13 @@ class MessageStatsPlugin(Star):
             help_msg += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
             help_msg += "💡 提示：所有功能都支持艾特机器人触发和关键词触发两种方式"
             
-            # 直接返回字符串，避免Plain组件问题
-            yield help_msg
+            # 使用event.plain_result发送消息
+            yield event.plain_result(help_msg)
             
         except Exception as e:
             self.logger.error(f"显示Rbot帮助失败: {e}", exc_info=True)
-            # 直接返回字符串，避免Plain组件问题
-            yield "显示帮助失败，请稍后重试"
+            # 使用event.plain_result发送消息
+            yield event.plain_result("显示帮助失败，请稍后重试")
     
     @filter.event_message_type(EventMessageType.ALL)
     async def rbot_admin_command_listener(self, event: AstrMessageEvent):
@@ -2798,7 +2798,11 @@ class MessageStatsPlugin(Star):
             
             # 解析@用户和操作指令
             async for result in self._parse_admin_command(event, group_id, user_id, message_str):
-                yield result
+                # 使用event.plain_result确保消息正确发送
+                if isinstance(result, str):
+                    yield event.plain_result(result)
+                else:
+                    yield result
             
         except Exception as e:
             self.logger.error(f"Rbot管理员命令处理失败: {e}", exc_info=True)
@@ -2834,6 +2838,7 @@ class MessageStatsPlugin(Star):
                     
                     # 执行操作
                     async for result in self._execute_admin_operation(event, group_id, target_name, operation):
+                        # 确保响应正确发送
                         yield result
                     break
                     
@@ -2855,7 +2860,7 @@ class MessageStatsPlugin(Star):
             
             # 检查权限：只有群管理员或Rbot管理员才能执行操作
             if not event.is_admin() and not self._is_rbot_admin(str(admin_id)):
-                yield "只有群管理员或Rbot管理员可以执行此操作！"
+                yield event.plain_result("只有群管理员或Rbot管理员可以执行此操作！")
                 return
             
             # 获取群组数据
@@ -2889,7 +2894,7 @@ class MessageStatsPlugin(Star):
                         break
             
             if not target_user:
-                yield f"未找到用户：{target_name}"
+                yield event.plain_result(f"未找到用户：{target_name}")
                 return
             
             # 解析操作类型和数值
@@ -2905,7 +2910,7 @@ class MessageStatsPlugin(Star):
                         target_user.add_cultivation(amount)
                         new_value = target_user.cultivation
                         action = "增加" if amount > 0 else "减少"
-                        yield f"⚔️ 修为调整：{target_user.nickname} {action}{abs(amount)}修为，当前修为：{new_value}"
+                        yield event.plain_result(f"已{action}{target_user.nickname}{abs(amount)}修为，当前修为：{new_value}")
                 elif '设置修为' in operation:
                     # 设置修为
                     match = re.search(r'设置修为\s*(\d+)', operation)
@@ -2914,7 +2919,7 @@ class MessageStatsPlugin(Star):
                         old_value = target_user.cultivation
                         target_user.cultivation = amount
                         new_value = target_user.cultivation
-                        yield f"⚔️ 修为设置：{target_user.nickname} 修为设置为{new_value}"
+                        yield event.plain_result(f"已设置{target_user.nickname}修为为{new_value}")
                         
             elif '阅历' in operation:
                 if '+' in operation or '-' in operation:
@@ -2926,7 +2931,7 @@ class MessageStatsPlugin(Star):
                         target_user.add_experience(amount)
                         new_value = target_user.experience
                         action = "增加" if amount > 0 else "减少"
-                        yield f"📚 阅历调整：{target_user.nickname} {action}{abs(amount)}阅历，当前阅历：{new_value}"
+                        yield event.plain_result(f"已{action}{target_user.nickname}{abs(amount)}阅历，当前阅历：{new_value}")
                 elif '设置阅历' in operation:
                     # 设置阅历
                     match = re.search(r'设置阅历\s*(\d+)', operation)
@@ -2935,7 +2940,7 @@ class MessageStatsPlugin(Star):
                         old_value = target_user.experience
                         target_user.experience = amount
                         new_value = target_user.experience
-                        yield f"📚 阅历设置：{target_user.nickname} 阅历设置为{new_value}"
+                        yield event.plain_result(f"已设置{target_user.nickname}阅历为{new_value}")
                         
             elif '积分' in operation:
                 if '+' in operation or '-' in operation:
@@ -2947,7 +2952,7 @@ class MessageStatsPlugin(Star):
                         target_user.add_points(amount)
                         new_value = target_user.points
                         action = "增加" if amount > 0 else "减少"
-                        yield f"💎 积分调整：{target_user.nickname} {action}{abs(amount)}积分，当前积分：{new_value}"
+                        yield event.plain_result(f"已{action}{target_user.nickname}{abs(amount)}积分，当前积分：{new_value}")
                 elif '设置积分' in operation:
                     # 设置积分
                     match = re.search(r'设置积分\s*(\d+)', operation)
@@ -2956,14 +2961,14 @@ class MessageStatsPlugin(Star):
                         old_value = target_user.points
                         target_user.points = amount
                         new_value = target_user.points
-                        yield f"💎 积分设置：{target_user.nickname} 积分设置为{new_value}"
+                        yield event.plain_result(f"已设置{target_user.nickname}积分为{new_value}")
             
             # 保存用户数据
             await self.data_manager.save_group_data(group_id, users)
             
         except Exception as e:
             self.logger.error(f"执行管理员操作失败: {e}", exc_info=True)
-            yield "执行操作失败，请稍后重试"
+            yield event.plain_result("执行操作失败，请稍后重试")
     
     async def _get_sign_in_status(self, group_id: str, user_id: str) -> bool:
         """获取用户今天的签到状态
