@@ -2818,12 +2818,12 @@ class MessageStatsPlugin(Star):
             
             # 匹配模式：@用户名 修为+100 或 @用户名 设置修为100
             patterns = [
-                r'@([^\s]+)\s+修为([+-]\d+)',  # @用户 修为+100
-                r'@([^\s]+)\s+阅历([+-]\d+)',  # @用户 阅历+100
-                r'@([^\s]+)\s+积分([+-]\d+)',  # @用户 积分+100
-                r'@([^\s]+)\s+设置修为(\d+)',  # @用户 设置修为100
-                r'@([^\s]+)\s+设置阅历(\d+)',  # @用户 设置阅历100
-                r'@([^\s]+)\s+设置积分(\d+)',  # @用户 设置积分100
+                r'@([^\s]+)\s+修为\s*([+-]\d+)',  # @用户 修为+100
+                r'@([^\s]+)\s+阅历\s*([+-]\d+)',  # @用户 阅历+100
+                r'@([^\s]+)\s+积分\s*([+-]\d+)',  # @用户 积分+100
+                r'@([^\s]+)\s+设置修为\s*(\d+)',  # @用户 设置修为100
+                r'@([^\s]+)\s+设置阅历\s*(\d+)',  # @用户 设置阅历100
+                r'@([^\s]+)\s+设置积分\s*(\d+)',  # @用户 设置积分100
             ]
             
             for pattern in patterns:
@@ -2898,7 +2898,7 @@ class MessageStatsPlugin(Star):
             if '修为' in operation:
                 if '+' in operation or '-' in operation:
                     # 增加或减少修为
-                    match = re.search(r'修为([+-]\d+)', operation)
+                    match = re.search(r'修为\s*([+-]\d+)', operation)
                     if match:
                         amount = int(match.group(1))
                         old_value = target_user.cultivation
@@ -2908,7 +2908,7 @@ class MessageStatsPlugin(Star):
                         yield f"⚔️ 修为调整：{target_user.nickname} {action}{abs(amount)}修为，当前修为：{new_value}"
                 elif '设置修为' in operation:
                     # 设置修为
-                    match = re.search(r'设置修为(\d+)', operation)
+                    match = re.search(r'设置修为\s*(\d+)', operation)
                     if match:
                         amount = int(match.group(1))
                         old_value = target_user.cultivation
@@ -2919,7 +2919,7 @@ class MessageStatsPlugin(Star):
             elif '阅历' in operation:
                 if '+' in operation or '-' in operation:
                     # 增加或减少阅历
-                    match = re.search(r'阅历([+-]\d+)', operation)
+                    match = re.search(r'阅历\s*([+-]\d+)', operation)
                     if match:
                         amount = int(match.group(1))
                         old_value = target_user.experience
@@ -2929,7 +2929,7 @@ class MessageStatsPlugin(Star):
                         yield f"📚 阅历调整：{target_user.nickname} {action}{abs(amount)}阅历，当前阅历：{new_value}"
                 elif '设置阅历' in operation:
                     # 设置阅历
-                    match = re.search(r'设置阅历(\d+)', operation)
+                    match = re.search(r'设置阅历\s*(\d+)', operation)
                     if match:
                         amount = int(match.group(1))
                         old_value = target_user.experience
@@ -2940,7 +2940,7 @@ class MessageStatsPlugin(Star):
             elif '积分' in operation:
                 if '+' in operation or '-' in operation:
                     # 增加或减少积分
-                    match = re.search(r'积分([+-]\d+)', operation)
+                    match = re.search(r'积分\s*([+-]\d+)', operation)
                     if match:
                         amount = int(match.group(1))
                         old_value = target_user.points
@@ -2950,7 +2950,7 @@ class MessageStatsPlugin(Star):
                         yield f"💎 积分调整：{target_user.nickname} {action}{abs(amount)}积分，当前积分：{new_value}"
                 elif '设置积分' in operation:
                     # 设置积分
-                    match = re.search(r'设置积分(\d+)', operation)
+                    match = re.search(r'设置积分\s*(\d+)', operation)
                     if match:
                         amount = int(match.group(1))
                         old_value = target_user.points
