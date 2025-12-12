@@ -204,7 +204,7 @@ MAX_RANK_COUNT = 100
 RANK_COUNT_KEY = 'rand'
 IMAGE_MODE_KEY = 'if_send_pic'
 
-@register("stats", "xiaoruange39", "群发言统计插件", "1.6.5")
+@register("stats", "xiaoruange39", "群发言统计插件", "1.6.6")
 class MessageStatsPlugin(Star):
     """群发言统计插件
     
@@ -643,7 +643,8 @@ class MessageStatsPlugin(Star):
         # 检查是否是Rbot命令（不艾特机器人的情况）
         if self._is_rbot_enabled_for_group(group_id):
             # 处理Rbot命令
-            await self._process_rbot_commands(event, group_id, user_id, message_str)
+            async for result in self._process_rbot_commands(event, group_id, user_id, message_str):
+                yield result
         
         # 跳过命令消息（以%或/开头）
         if message_str.startswith(('%', '/')):

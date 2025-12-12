@@ -1,5 +1,5 @@
 name: "astrbot_plugin_message_gouzidingzhi"
 author: "muyu6026"
 description: "QQ群消息统计插件，支持消息数量统计和排行榜生成，包含定时推送和Rbot游戏功能"
-version: "1.6.5"
+version: "1.6.6"
 repo: "https://github.com/muyu6026/gouzidingzhi"
