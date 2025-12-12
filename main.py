@@ -204,7 +204,7 @@ MAX_RANK_COUNT = 100
 RANK_COUNT_KEY = 'rand'
 IMAGE_MODE_KEY = 'if_send_pic'
 
-@register("stats", "xiaoruange39", "群发言统计插件", "1.6.3")
+@register("stats", "xiaoruange39", "群发言统计插件", "1.6.4")
 class MessageStatsPlugin(Star):
     """群发言统计插件
     
