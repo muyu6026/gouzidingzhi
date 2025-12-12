@@ -3315,6 +3315,12 @@ class MessageStatsPlugin(Star):
                         # 使用安全发送消息API
                         await self._safe_send_message(event, result)
                         
+            elif message_str == "排行信息":
+                # 处理排行信息命令
+                async for result in self.rbot_rank_info(event):
+                    # 使用安全发送消息API
+                    await self._safe_send_message(event, result)
+                        
             elif message_str == "帮助":
                 # 处理帮助命令
                 async for result in self.rbot_help(event):
@@ -3417,6 +3423,20 @@ class MessageStatsPlugin(Star):
                 if hasattr(result, 'text'):
                     message_text = result.text
                     message_content = MessageChain().message(message_text)
+                elif hasattr(result, 'convert') and hasattr(result, 'type'):
+                    # 处理Plain(type=<ComponentType.Plain: 'Plain'>, text='...', convert=True)这种情况
+                    # 尝试获取text属性，即使它可能不是直接属性
+                    try:
+                        # 尝试通过__dict__获取text属性
+                        if hasattr(result, '__dict__') and 'text' in result.__dict__:
+                            message_text = result.__dict__['text']
+                            message_content = MessageChain().message(message_text)
+                        else:
+                            # 如果无法获取text，尝试转换为字符串
+                            message_content = MessageChain().message(str(result))
+                    except Exception:
+                        # 如果所有方法都失败，转换为字符串
+                        message_content = MessageChain().message(str(result))
                 else:
                     # 如果没有text属性，尝试转换为字符串
                     message_content = MessageChain().message(str(result))
