@@ -109,6 +109,11 @@ astrbot_plugin_message_stats/
 
 ## 📝 更新日志
 
+## V1.6.5 (2025-12-12)
+- 🔧 **进一步修复Plain组件显示问题**：彻底解决了显示`Plain(type=<ComponentType.Plain: 'Plain'>, text='...', convert=True)`的问题
+- 🔧 **优化非艾特命令处理**：直接在`_process_rbot_commands`方法中处理响应，避免通过`_safe_send_message`方法导致的Plain组件问题
+- 🔧 **重构签到命令处理**：将签到逻辑直接集成到`_process_rbot_commands`方法中，确保响应正确显示
+
 ## V1.6.4 (2025-12-12)
 - 🔧 **修复"排行信息"命令无响应问题**：修复了排行信息命令无法正常响应的问题
 - 🔧 **修复管理员操作无响应问题**：修复了修改修为、阅历、积分时没有回复信息的问题

@@ -204,7 +204,7 @@ MAX_RANK_COUNT = 100
 RANK_COUNT_KEY = 'rand'
 IMAGE_MODE_KEY = 'if_send_pic'
 
-@register("stats", "xiaoruange39", "群发言统计插件", "1.6.4")
+@register("stats", "xiaoruange39", "群发言统计插件", "1.6.5")
 class MessageStatsPlugin(Star):
     """群发言统计插件
     
@@ -3291,41 +3291,97 @@ class MessageStatsPlugin(Star):
                     await self._safe_send_message(event, f"{user_name} 今天已经签到过了，请明天再来！")
                 else:
                     # 直接执行签到逻辑，避免重复调用导致延迟
-                    await self._execute_sign_in(event, group_id, user_id)
+                    # 获取签到结果并直接发送，避免Plain组件问题
+                    try:
+                        # 获取用户显示名称
+                        user_name = await self._get_user_display_name(event, group_id, user_id)
+                        
+                        # 获取用户数据
+                        user = await self.data_manager.get_user_in_group(group_id, user_id)
+                        
+                        if not user:
+                            # 如果用户不存在，创建新用户
+                            from .utils.models import UserData
+                            user = UserData(
+                                user_id=user_id,
+                                nickname=user_name,
+                                message_count=0
+                            )
+                            # 保存新用户
+                            users = await self.data_manager.get_group_data(group_id)
+                            users.append(user)
+                            await self.data_manager.save_group_data(group_id, users)
+                        
+                        # 执行签到
+                        success, message, stones_gain, cultivation_gain = user.sign_today()
+                        
+                        if success:
+                            # 标记用户今天已签到
+                            await self._set_sign_in_status(group_id, user_id, True)
+                            
+                            # 保存用户数据
+                            users = await self.data_manager.get_group_data(group_id)
+                            # 找到当前用户并更新
+                            for i, u in enumerate(users):
+                                if u.user_id == user_id:
+                                    users[i] = user  # 使用更新后的用户对象
+                                    break
+                            await self.data_manager.save_group_data(group_id, users)
+                        
+                        # 直接发送结果，避免Plain组件问题
+                        yield event.plain_result(f"{user_name} {message}")
+                    except Exception as e:
+                        self.logger.error(f"执行签到操作失败: {e}", exc_info=True)
+                        yield event.plain_result("签到失败，请稍后重试")
                     
             elif message_str == "查看个人信息":
                 # 处理查看个人信息命令
                 async for result in self.rbot_user_info(event):
-                    # 使用安全发送消息API
-                    await self._safe_send_message(event, result)
+                    # 直接使用event.plain_result发送消息，避免Plain组件问题
+                    if isinstance(result, str):
+                        yield event.plain_result(result)
+                    else:
+                        yield result
                     
             elif message_str == "查看修为排名":
                 # 检查是否是群管理员
                 if event.is_admin():
                     # 处理查看修为排名命令
                     async for result in self.rbot_cultivation_rank(event):
-                        # 使用安全发送消息API
-                        await self._safe_send_message(event, result)
+                        # 直接使用event.plain_result发送消息，避免Plain组件问题
+                        if isinstance(result, str):
+                            yield event.plain_result(result)
+                        else:
+                            yield result
                         
             elif message_str == "查看阅历排行":
                 # 检查是否是群管理员
                 if event.is_admin():
                     # 处理查看阅历排行命令
                     async for result in self.rbot_experience_rank(event):
-                        # 使用安全发送消息API
-                        await self._safe_send_message(event, result)
+                        # 直接使用event.plain_result发送消息，避免Plain组件问题
+                        if isinstance(result, str):
+                            yield event.plain_result(result)
+                        else:
+                            yield result
                         
             elif message_str == "排行信息":
                 # 处理排行信息命令
                 async for result in self.rbot_rank_info(event):
-                    # 使用安全发送消息API
-                    await self._safe_send_message(event, result)
+                    # 直接使用event.plain_result发送消息，避免Plain组件问题
+                    if isinstance(result, str):
+                        yield event.plain_result(result)
+                    else:
+                        yield result
                         
             elif message_str == "帮助":
                 # 处理帮助命令
                 async for result in self.rbot_help(event):
-                    # 使用安全发送消息API
-                    await self._safe_send_message(event, result)
+                    # 直接使用event.plain_result发送消息，避免Plain组件问题
+                    if isinstance(result, str):
+                        yield event.plain_result(result)
+                    else:
+                        yield result
                         
         except Exception as e:
             self.logger.error(f"处理Rbot命令失败: {e}", exc_info=True)
